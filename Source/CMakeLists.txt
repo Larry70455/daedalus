@@ -109,6 +109,7 @@ else()
 	option(DAEDALUS_PROFILE_EXECUTION "Keep track of various execution stats" OFF)
 	option(DUMPOSFUNCTIONS "Dump OSHLE Functions" OFF)
 	option(DAEDALUS_FRAMERATE_ANALYSIS "Output a CSV file containing framerate analysis" OFF)
+	option(DAEDALUS_STATE_CHECK "Interpreter vs dynarec check: if statecheck.txt exists, boot that ROM and dump CPU state every frame" OFF)
 	option(DAEDALUS_PERF_LOG "Write per frame timings (dynarec, display list, textures, GPU and audio waits) to PerfLogs/<game>.csv" OFF)
 	option(DAEDALUS_DEBUG_AUDIO "Output some Audio Samples to raw file" OFF)
 
@@ -129,6 +130,7 @@ else()
 		option(INTRAFONT "Use Native Fonts" ON) #If this is off, SDL will be enabled
 		option(DAEDALUS_SDL "Enable SDL" OFF)
 		option(DAEDALUS_ENABLE_OS_HOOKS "Enable High Level Emulation Hooks" ON) 
+		set(DAEDALUS_PSP_MEMSIZE "1" CACHE STRING "PARAM.SFO MEMSIZE: 1 = full PSP-2000/3000/Go memory, 2 = pspdev default (24 MB, Vita friendly)")
 
 	elseif(UNIX)
 		if ((${CMAKE_SYSTEM_PROCESSOR} STREQUAL "aarch64" AND CMAKE_SYSTEM_NAME STREQUAL "Linux") OR (${CMAKE_SYSTEM_PROCESSOR} STREQUAL "armv" AND CMAKE_SYSTEM_NAME STREQUAL "Linux"))
@@ -325,6 +327,11 @@ add_definitions(-D_USE_MATH_DEFINES)
 			BACKGROUND_PATH ${PROJECT_SOURCE_DIR}/Source/SysPSP/Resources/eboot_icons/pic1.png
 			TITLE DaedalusX64
 			BUILD_PRX
+			# MEMSIZE=1 asks the firmware for the full user memory on PSP-2000,
+			# 3000 and Go (about 52 MB instead of 24 MB). The pspdev helper
+			# defaults to 2 when this is not given, which leaves Daedalus with
+			# the small 24 MB partition.
+			MEMSIZE ${DAEDALUS_PSP_MEMSIZE}
 			)
 	endif(PSP)
 
