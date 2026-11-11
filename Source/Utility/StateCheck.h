@@ -36,6 +36,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //   mode=interpreter        (or dynarec)
 //   frames=300
 //   savestate=SaveStates/x.ss   (optional)
+//   ramhash=0               (optional: skip the RAM checksum. It costs tens
+//                            of milliseconds per frame on a PSP, so turn it
+//                            off when the run is used for timing)
 //
 // When DAEDALUS_STATE_CHECK is not defined, the macros below do nothing.
 

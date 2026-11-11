@@ -47,6 +47,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 static FILE *	gOut = nullptr;
 static u32		gFramesWanted = 0;
 static u32		gFrame = 0;
+static bool		gHashRam = true;	// ramhash=0 in statecheck.txt turns the RAM checksum off (for timing runs)
 
 // FNV-1a over 32 bit words. Not cryptographic, only needs to change when the
 // data changes.
@@ -108,6 +109,7 @@ bool StateCheck_Start()
 		else if( key == "mode" )		mode = value;
 		else if( key == "frames" )		frames = (u32)std::strtoul( value.c_str(), nullptr, 10 );
 		else if( key == "savestate" )	savestate = value;
+		else if( key == "ramhash" )		gHashRam = ( value != "0" );
 	}
 
 	if( rom.empty() || frames == 0 || ( mode != "interpreter" && mode != "dynarec" ) )
@@ -166,7 +168,7 @@ void StateCheck_OnVerticalBlank()
 			 s.FPUControl[ 31 ]._u32,
 			 (unsigned long long)s.MultHi._u64,
 			 (unsigned long long)s.MultLo._u64,
-			 HashWords( g_pu8RamBase, gRamSize ) );
+			 gHashRam ? HashWords( g_pu8RamBase, gRamSize ) : 0 );
 
 	for( u32 i = 0; i < 32; ++i )
 		fprintf( gOut, " %016llx", (unsigned long long)s.CPU[ i ]._u64 );
