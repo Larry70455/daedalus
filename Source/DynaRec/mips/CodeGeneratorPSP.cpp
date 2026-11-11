@@ -49,8 +49,12 @@ using namespace AssemblyUtils;
 //Enable to load/store floats directly to/from FPU //Corn
 #define ENABLE_LWC1
 #define ENABLE_SWC1
-//#define ENABLE_LDC1
-//#define ENABLE_SDC1
+//Native LDC1 / SDC1 for the fast memory path (stack, or accesses known to be in RAM).
+//These two instructions save and restore FPU registers in nearly every function and
+//used to be handed to the interpreter. SDC1 converts simulated doubles back to real
+//ones (see GenerateSDC1), which the original disabled version did not do.
+#define ENABLE_LDC1
+#define ENABLE_SDC1
 
 //Define to handle full 64bit checks for SLT,SLTU,SLTI & SLTIU //Corn
 //#define ENABLE_64BIT
@@ -1392,6 +1396,18 @@ void	CCodeGeneratorPSP::GetBaseRegisterAndOffset( const void * p_address, EPspRe
 }*/
 
 
+//	True if LDC1 / SDC1 can be generated natively: only on the fast memory path
+//	(the same condition the word loads and stores use), only for an even register
+//	(a double is a register pair), and not in a branch delay slot. Anything else
+//	goes to the interpreter as before.
+static inline bool CanUseNativeDoubleMemOp( bool branch_delay_slot, u32 ft, EN64Reg base, s32 offset, bool quick_load )
+{
+	return !branch_delay_slot
+		&& ( ( ft & 1 ) == 0 ) && ft < 31
+		&& offset >= -32768 && offset <= 32760	// offset + 4 must still fit in 16 bits
+		&& ( ( base == N64Reg_SP ) || ( gMemoryAccessOptimisation && quick_load ) );
+}
+
 //	Generates instruction handler for the specified op code.
 //	Returns a jump location if an exception handler is required
 
@@ -1532,7 +1548,7 @@ CJumpLocation	CCodeGeneratorPSP::GenerateOpCode( const STraceEntry& ti, bool bra
 	case OP_LD:			GenerateLD( address, branch_delay_slot, rt, base, s16( op_code.immediate ) );	handled = true; break;
 	case OP_LWC1:		GenerateLWC1( address, branch_delay_slot, ft, base, s16( op_code.immediate ) );	handled = true; break;
 #ifdef ENABLE_LDC1
-	case OP_LDC1:		if( !branch_delay_slot & gMemoryAccessOptimisation & mQuickLoad ) { GenerateLDC1( address, branch_delay_slot, ft, base, s16( op_code.immediate ) );	handled = true; } break;
+	case OP_LDC1:		if( CanUseNativeDoubleMemOp( branch_delay_slot, ft, base, s16( op_code.immediate ), mQuickLoad ) ) { GenerateLDC1( address, branch_delay_slot, ft, base, s16( op_code.immediate ) );	handled = true; } break;
 #endif
 
 #ifdef ENABLE_LWR_LWL
@@ -1546,7 +1562,7 @@ CJumpLocation	CCodeGeneratorPSP::GenerateOpCode( const STraceEntry& ti, bool bra
 	case OP_SD:			GenerateSD( address, branch_delay_slot, rt, base, s16( op_code.immediate ) );	handled = true; break;
 	case OP_SWC1:		GenerateSWC1( address, branch_delay_slot, ft, base, s16( op_code.immediate ) );	handled = true; break;
 #ifdef ENABLE_SDC1
-	case OP_SDC1:		if( !branch_delay_slot & gMemoryAccessOptimisation & mQuickLoad ) { GenerateSDC1( address, branch_delay_slot, ft, base, s16( op_code.immediate ) );	handled = true; } break;
+	case OP_SDC1:		if( CanUseNativeDoubleMemOp( branch_delay_slot, ft, base, s16( op_code.immediate ), mQuickLoad ) ) { GenerateSDC1( address, branch_delay_slot, ft, base, s16( op_code.immediate ) );	handled = true; } break;
 #endif
 
 #ifdef ENABLE_SWR_SWL
@@ -3915,7 +3931,11 @@ inline void	CCodeGeneratorPSP::GenerateLWC1( u32 address, bool set_branch_delay,
 //
 
 #ifdef ENABLE_LDC1
-inline void	CCodeGeneratorPSP::GenerateLDC1( u32 address, bool set_branch_delay, u32 ft, EN64Reg base, s32 offset )
+// Load a doubleword into the register pair (ft, ft+1) as raw bits: high word
+// (lower address) into ft+1, low word into ft. The register is then a real
+// double, not a simulated one; the first double operation that uses it converts
+// it, exactly as when the interpreter performs LDC1.
+inline void	CCodeGeneratorPSP::GenerateLDC1( u32 address [[maybe_unused]], bool set_branch_delay [[maybe_unused]], u32 ft, EN64Reg base, s32 offset )
 {
 	EPspReg		reg_base( GetRegisterAndLoadLo( base, PspReg_A0 ) );
 	ADDU( PspReg_A0, reg_base, gMemoryBaseReg );
@@ -4047,19 +4067,67 @@ inline void	CCodeGeneratorPSP::GenerateSWC1( u32 current_pc, bool set_branch_del
 //
 
 #ifdef ENABLE_SDC1
-inline void	CCodeGeneratorPSP::GenerateSDC1( u32 current_pc, bool set_branch_delay, u32 ft, EN64Reg base, s32 offset )
+inline void	CCodeGeneratorPSP::GenerateSDC1( u32 current_pc [[maybe_unused]], bool set_branch_delay [[maybe_unused]], u32 ft, EN64Reg base, s32 offset )
 {
-	EN64FloatReg	n64_ft_sig = EN64FloatReg( ft );
-	EPspFloatReg	psp_ft_sig = GetFloatRegisterAndLoad( n64_ft_sig );
-	EN64FloatReg	n64_ft = EN64FloatReg( ft + 1 );
-	EPspFloatReg	psp_ft( GetFloatRegisterAndLoad( EN64FloatReg(n64_ft + 1) ) );
+	// A double lives in the pair (ft, ft+1): ft is the low word and ft+1 the
+	// high word, which N64 memory holds as high word first. With the doubles
+	// optimisation a double can also be "simulated": ft then holds the marker
+	// SIMULATESIG and ft+1 holds the value as a plain float. Memory must always
+	// receive a real double, so a simulated register is converted first, the
+	// same as the interpreter's LoadFPR_Long does. (The earlier disabled
+	// version stored the raw words and would have written the marker to memory.)
+	const EN64FloatReg	n64_lo = EN64FloatReg( ft );
+	const EN64FloatReg	n64_hi = EN64FloatReg( ft + 1 );
+	const EPspFloatReg	psp_lo = EPspFloatReg( n64_lo );	// 1:1 mapping
+	const EPspFloatReg	psp_hi = EPspFloatReg( n64_hi );
 
-	//GenerateStore( current_pc, (EPspReg)psp_ft, base, offset, OP_SWC1, 0, set_branch_delay ? WriteBitsDirectBD_u32 : WriteBitsDirect_u32 );
-	//GenerateStore( current_pc, (EPspReg)psp_ft_sig, base, offset + 4, OP_SWC1, 0, set_branch_delay ? WriteBitsDirectBD_u32 : WriteBitsDirect_u32 );
-	EPspReg		reg_base( GetRegisterAndLoadLo( base, PspReg_A0 ) );
-	ADDU( PspReg_A0, reg_base, gMemoryBaseReg );
-	SWC1( psp_ft, PspReg_A0, offset);
-	SWC1( psp_ft_sig, PspReg_A0, offset+4);
+	// Make sure both halves are in FPU registers. GetFloatRegisterAndLoad is
+	// not used because it clears the "simulated" flag we want to look at.
+	if( !mRegisterCache.IsFPValid( n64_lo ) )
+	{
+		GetFloatVar( psp_lo, &gCPUState.FPU[n64_lo]._f32 );
+		mRegisterCache.MarkFPAsValid( n64_lo, true );
+	}
+	if( !mRegisterCache.IsFPValid( n64_hi ) )
+	{
+		GetFloatVar( psp_hi, &gCPUState.FPU[n64_hi]._f32 );
+		mRegisterCache.MarkFPAsValid( n64_hi, true );
+	}
+
+	const bool		known_simulated( mRegisterCache.IsFPSim( n64_lo ) );
+
+	// A2 = host address of the doubleword. A2 survives the _FloatToDouble call below.
+	EPspReg			reg_base( GetRegisterAndLoadLo( base, PspReg_A0 ) );
+	ADDU( PspReg_A2, reg_base, gMemoryBaseReg );
+
+	CJumpLocation	to_simulated;
+	CJumpLocation	to_end;
+
+	if( !known_simulated )
+	{
+		// Not known statically: check the marker at run time.
+		MFC1( PspReg_A1, psp_lo );
+		LoadConstant( PspReg_A0, SIMULATESIG );
+		to_simulated = BEQ( PspReg_A1, PspReg_A0, CCodeLabel( nullptr ), true );
+
+		// Real double: store the two words as they are.
+		SWC1( psp_hi, PspReg_A2, offset );
+		SWC1( psp_lo, PspReg_A2, offset + 4 );
+		to_end = BEQ( PspReg_R0, PspReg_R0, CCodeLabel( nullptr ), true );
+
+		PatchJumpLong( to_simulated, GetAssemblyBuffer()->GetLabel() );
+	}
+
+	// Simulated double: convert the float to a real double (v0 = low word, v1 = high word).
+	JAL( CCodeLabel( reinterpret_cast< const void * >( _FloatToDouble ) ), false );
+	MFC1( PspReg_A0, psp_hi );		// delay slot: the float to convert
+	SW( PspReg_V1, PspReg_A2, offset );
+	SW( PspReg_V0, PspReg_A2, offset + 4 );
+
+	if( !known_simulated )
+	{
+		PatchJumpLong( to_end, GetAssemblyBuffer()->GetLabel() );
+	}
 }
 #endif
 
