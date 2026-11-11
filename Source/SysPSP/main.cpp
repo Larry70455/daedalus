@@ -100,6 +100,7 @@ extern int PSP_TV_LACED;
 
 bool g32bitColorMode = false; // We might be able to ditch this soon. Phat exclusive.
 bool PSP_IS_SLIM = false;
+int  gPspModel = -1;		// kuKernelGetModel(): 0 PSP-1000, 1 2000, 2 and 3 3000, 4 PSP Go (05g)
 
 PSP_HEAP_SIZE_KB(-256);
 
@@ -146,6 +147,8 @@ static bool	Initialize()
 		return false;
 	}
 	#endif
+
+	gPspModel = kuKernelGetModel();
 
 	// Detect PSP greater than PSP 1000
 	if ( kuKernelGetModel() > 0 )

@@ -38,9 +38,16 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <vector>
 
 #ifdef DAEDALUS_PSP
+#include <pspkernel.h>
+#include <psppower.h>
 #include <pspthreadman.h>
 #else
 #include <chrono>
+#endif
+
+#ifdef DAEDALUS_PSP
+extern int gPspModel;
+extern bool PSP_IS_SLIM;
 #endif
 
 namespace PerfLog
@@ -399,6 +406,34 @@ static std::string SafeFileName( const std::string & name )
 	return out;
 }
 
+#ifdef DAEDALUS_PSP
+// Time a fixed loop of dependent instructions. The absolute number means
+// little, but it scales with the real CPU clock: run it on a stock 333 MHz
+// console and again with an overclock plugin active, and the ratio of the two
+// is the real speed up. (scePowerGetCpuClockFrequency only reports what the
+// system believes, which an overclock plugin does not change.)
+static u32 CpuLoopMicros()
+{
+	u32 n = 20000000;
+	u32 t0 = sceKernelGetSystemTimeLow();
+	__asm__ volatile ( "1: addiu %0, %0, -1\n bnez %0, 1b\n nop\n" : "+r" ( n ) );
+	return sceKernelGetSystemTimeLow() - t0;
+}
+
+static void WriteSystemInfo( std::string & out )
+{
+	static const char * const kModels[] = { "PSP-1000", "PSP-2000", "PSP-3000", "PSP-3000 (04g)", "PSP Go", "unknown" };
+	int m = ( gPspModel >= 0 && gPspModel <= 4 ) ? gPspModel : 5;
+	char line[ 320 ];
+	snprintf( line, sizeof( line ), "# system: model %s (kuKernelGetModel=%d), 64MB model %s, system reports cpu %d MHz bus %d MHz\n",
+			  kModels[ m ], gPspModel, PSP_IS_SLIM ? "yes" : "no", scePowerGetCpuClockFrequency(), scePowerGetBusClockFrequency() );
+	out += line;
+	snprintf( line, sizeof( line ), "# system: cpu speed test (20M loop iterations) %u us, %u us, %u us (compare between runs, lower is faster)\n",
+			  CpuLoopMicros(), CpuLoopMicros(), CpuLoopMicros() );
+	out += line;
+}
+#endif
+
 void OpenGame()
 {
 	CloseGame();
@@ -423,6 +458,9 @@ void OpenGame()
 	snprintf( line, sizeof( line ), "# session start, game \"%s\", crc %08x-%08x, units: microseconds per N64 vertical blank\n",
 			  g_ROM.settings.GameName.c_str(), g_ROM.mRomID.CRC[ 0 ], g_ROM.mRomID.CRC[ 1 ] );
 	gPending += line;
+#ifdef DAEDALUS_PSP
+	WriteSystemInfo( gPending );
+#endif
 
 	gPending += "vi,flips,total";
 	for( u32 i = 0; i < kNumCategories; ++i )
