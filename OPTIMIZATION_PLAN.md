@@ -37,9 +37,20 @@ Audio (PPSSPP, same scenes):
 | Sync (main CPU) | about 2.2 ms (12% of a frame) | measured |
 | Async (Media Engine) | about 0.03 ms on the main CPU | PPSSPP has no ME firmware, so this is not trustworthy |
 
-With audio on, the emulator sleeps 23 to 40% of each frame waiting for the audio
+With audio on, the emulator waits 23 to 40% of each frame for the audio
 buffer to drain. That is spare capacity (the game is paced by the audio), not a
-cost.
+cost. The wait is a busy spin loop inside `CAudioBuffer::AddSamples`
+(`while (write_ptr == read_ptr)` on an uncached buffer). On a real PSP that
+burns battery and keeps hitting the memory bus while the GPU and Media Engine
+also need it. Replacing the spin with a short sleep would not change speed but
+should help battery and bus contention. Low risk, not yet done.
+
+Audio work by function (sync mode, function level profile): `ENVMIXER`,
+`ADPCM`, `MIXER` and `Resample` are the real audio cost. For Mario 64 the
+audio ucode is about 2.2 ms of about 11 ms of active CPU time per frame, so
+roughly 20% of the work the CPU actually does. Smash Bros uses the `*3`
+variants (`ENVMIXER3`, `MIXER3`, `ADPCM3`, `RESAMPLE3`), so both versions of
+the mixer code need attention.
 
 ## 3. Corrections to earlier assumptions
 
@@ -87,7 +98,7 @@ Order is by expected gain for "full speed with audio" against risk.
 |---|---|---|---|---|---|
 | 1 | Real hardware run of the PerfLog build with audio off, sync and async | PPSSPP cannot model cache and Media Engine behavior | Calibrates everything below | none | **requested** |
 | 2 | Fix the Media Engine busy race (wait, do not run in parallel) | Section 4, item 2 | Correct async audio | low | planned, untestable here |
-| 3 | Profile the audio HLE by function, then speed up its inner loops (ADPCM, resampling, mixing) | 2.2 ms per frame on the main CPU in sync mode. Faster audio code helps sync mode and the Media Engine | up to 5 to 8% of a frame | low to medium | next |
+| 3 | Speed up the audio mixer inner loops (`ENVMIXER`, `ENVMIXER3`, `MIXER`, `MIXER3`, `ADPCM`, `ADPCM3`, `Resample`), for example with the VFPU or tighter integer code. Also replace the buffer wait spin with a short sleep | About 2.2 ms per frame (roughly 20% of active CPU time) in sync mode. Faster code helps sync mode and the Media Engine | 5 to 10% of a frame | low to medium (output must stay bit identical, which can be checked by comparing the audio buffer) | next |
 | 4 | Make async audio the default if step 1 shows it works | Removes about 12% of the main CPU load | about 12% | medium | after 1 and 2 |
 | 5 | Native `LDC1`/`SDC1` with simulated double handling | Section 4, item 1 | about 3 to 7% in Smash | medium to high | needs generated test ROMs |
 | 6 | Cheaper compiled block exits and block linking | Block exit checks, block switching and return address lookup add up to about 25% of PSP code time in Smash, 10% in Mario (profile is rough) | 10 to 20% | high | after more data |
