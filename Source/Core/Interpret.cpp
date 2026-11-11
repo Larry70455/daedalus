@@ -145,8 +145,8 @@ void CPU_Go()
 		u32	stuff_to_do( gCPUState.GetStuffToDo() );
 		while(stuff_to_do == 0)
 		{
+			DAEDALUS_PERF_COUNT_INTERPRETED_OP( gCPUState.CurrentPC );	// No-op unless DAEDALUS_PERF_LOG
 			CPU_EXECUTE_OP< false >();
-			DAEDALUS_PERF_COUNT_INTERPRETED_OP();	// No-op unless DAEDALUS_PERF_LOG
 
 			stuff_to_do = gCPUState.GetStuffToDo();
 		}

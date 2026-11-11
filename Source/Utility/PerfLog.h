@@ -63,6 +63,7 @@ namespace PerfLog
 		kAudioHle,		// Audio list processing on the main CPU (or the Media Engine hand off)
 		kAudioWait,		// Spinning because the audio output buffer is full
 		kLimiter,		// Sleeping in the speed limiter (idle time, not a bottleneck)
+		kCompile,		// Dynarec code generation (turning a recorded trace into native code)
 		kLogIo,			// Writing this log file
 		kNumCategories
 	};
@@ -79,6 +80,21 @@ namespace PerfLog
 	// gInterpretedOps counts ops run by the plain interpreter loop (code that
 	// is not, or not yet, recompiled). gFallbackOps counts ops that recompiled
 	// code could not translate and handed back to an interpreter function.
+	// Dynarec event counters (reported in <game>_interp_hot.txt)
+	enum Stat
+	{
+		kStatFlushICache = 0,	// whole cache dropped: the game used the CACHE instruction
+		kStatFlushOverlap,		// whole cache dropped: a write overlapped compiled code
+		kStatFlushSize,			// whole cache dropped: too many fragments
+		kStatFlushHotMap,		// whole cache dropped: hot trace table full
+		kStatTraceStarted,
+		kStatTraceAborted,
+		kStatFragmentCreated,
+		kStatAudioUnderrun,		// the audio output asked for samples and the buffer was empty (heard as a crackle)
+		kNumStats
+	};
+	extern u32 gStats[ kNumStats ];
+	void	NoteInterpretedPC( u32 pc );	// Counts one interpreted op and builds the hot address table
 	extern u32 gInterpretedOps;
 	extern u32 gFallbackOps;
 	void	NoteFallbackSite( u32 op_code_bits );	// Called by the dynarec when it emits a fallback call
@@ -100,7 +116,8 @@ namespace PerfLog
 #define DAEDALUS_PERF_CLOSE_GAME()			PerfLog::CloseGame()
 #define DAEDALUS_PERF_END_FRAME()			PerfLog::EndFrame()
 #define DAEDALUS_PERF_NOTE_FLIP()			PerfLog::NoteFlip()
-#define DAEDALUS_PERF_COUNT_INTERPRETED_OP()	( PerfLog::gInterpretedOps++ )
+#define DAEDALUS_PERF_COUNT_INTERPRETED_OP( pc )	PerfLog::NoteInterpretedPC( pc )
+#define DAEDALUS_PERF_STAT( s )	( PerfLog::gStats[ PerfLog::s ]++ )
 
 #else
 
@@ -109,7 +126,8 @@ namespace PerfLog
 #define DAEDALUS_PERF_CLOSE_GAME()			do {} while( 0 )
 #define DAEDALUS_PERF_END_FRAME()			do {} while( 0 )
 #define DAEDALUS_PERF_NOTE_FLIP()			do {} while( 0 )
-#define DAEDALUS_PERF_COUNT_INTERPRETED_OP()	do {} while( 0 )
+#define DAEDALUS_PERF_COUNT_INTERPRETED_OP( pc )	do {} while( 0 )
+#define DAEDALUS_PERF_STAT( s )	do {} while( 0 )
 
 #endif // DAEDALUS_PERF_LOG
 

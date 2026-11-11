@@ -31,6 +31,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <filesystem>
 #include <unordered_map>
@@ -48,7 +49,7 @@ namespace PerfLog
 static const char * const kCategoryNames[ kNumCategories ] =
 {
 	"cpu_other", "dynarec", "dlist", "vertex", "texture",
-	"gpu_wait", "audio_hle", "audio_wait", "limiter", "log_io",
+	"gpu_wait", "audio_hle", "audio_wait", "limiter", "compile", "log_io",
 };
 
 // Microsecond clock. On the PSP this is the kernel system timer, which is a
@@ -82,6 +83,7 @@ static u32			gFrameIndex = 0;
 static u32			gFlipsThisFrame = 0;
 
 u32					gInterpretedOps = 0;
+u32					gStats[ kNumStats ];
 u32					gFallbackOps = 0;
 
 // Fallback statistics, keyed by the instruction "kind" (see FallbackKey)
@@ -94,6 +96,13 @@ struct FallbackStats
 static std::unordered_map< u32, FallbackStats >	gFallbacks;
 static std::filesystem::path	gFallbackPath;
 static const u32				kFallbackDumpInterval = 600;	// Vertical blanks (about 10 seconds)
+
+// Hot address table for the plain interpreter: how often each instruction
+// address was interpreted (not recompiled). Open addressing, power of two size.
+static const u32				kPcTableSize = 1 << 16;
+static u32						gPcKey[ kPcTableSize ];
+static u32						gPcCount[ kPcTableSize ];
+static u32						gPcUsed = 0;
 
 // Totals for the summary written when the game is closed
 static u64			gTotalMicros[ kNumCategories ];
@@ -238,6 +247,63 @@ static void WriteFallbacks()
 	fclose( fh );
 }
 
+void NoteInterpretedPC( u32 pc )
+{
+	gInterpretedOps++;
+	if( !gActive || gPcUsed > kPcTableSize / 2 )
+		return;
+	u32 slot = ( ( pc >> 2 ) * 2654435761u ) >> 16;
+	for( ;; slot = ( slot + 1 ) & ( kPcTableSize - 1 ) )
+	{
+		if( gPcKey[ slot ] == pc )	{ gPcCount[ slot ]++; return; }
+		if( gPcKey[ slot ] == 0 )	{ gPcKey[ slot ] = pc; gPcCount[ slot ] = 1; gPcUsed++; return; }
+	}
+}
+
+static void WriteInterpretedHot()
+{
+	if( gFallbackPath.empty() )
+		return;
+	std::filesystem::path path = gFallbackPath;
+	path.replace_filename( path.stem().string().substr( 0, path.stem().string().size() - 10 ) + "_interp_hot.txt" );	// strip "_fallbacks"
+
+	struct Entry { u32 pc; u32 count; };
+	std::vector< Entry > all, blocks;
+	u64 total = 0;
+	std::unordered_map< u32, u32 > by_block;	// 256 byte blocks
+	for( u32 i = 0; i < kPcTableSize; ++i )
+	{
+		if( gPcKey[ i ] == 0 )
+			continue;
+		all.push_back( { gPcKey[ i ], gPcCount[ i ] } );
+		by_block[ gPcKey[ i ] & ~0xffu ] += gPcCount[ i ];
+		total += gPcCount[ i ];
+	}
+	for( const auto & it : by_block )
+		blocks.push_back( { it.first, it.second } );
+	auto by_count = []( const Entry & a, const Entry & b ) { return a.count > b.count; };
+	std::sort( all.begin(), all.end(), by_count );
+	std::sort( blocks.begin(), blocks.end(), by_count );
+
+	FILE * fh = fopen( path.string().c_str(), "w" );
+	if( fh == nullptr )
+		return;
+	fprintf( fh, "# Instructions run by the plain interpreter (not recompiled) for \"%s\"\n", g_ROM.settings.GameName.c_str() );
+	fprintf( fh, "# %llu interpreted ops recorded, %u distinct addresses\n", (unsigned long long)total, (u32)all.size() );
+	fprintf( fh, "# dynarec events: cache flushes: cache instruction %u, write over compiled code %u, too many fragments %u, hot trace table full %u\n",
+			 gStats[ kStatFlushICache ], gStats[ kStatFlushOverlap ], gStats[ kStatFlushSize ], gStats[ kStatFlushHotMap ] );
+	fprintf( fh, "# dynarec events: traces started %u, aborted %u, fragments compiled %u\n",
+			 gStats[ kStatTraceStarted ], gStats[ kStatTraceAborted ], gStats[ kStatFragmentCreated ] );
+	fprintf( fh, "# audio underruns (output ran dry, heard as crackle): %u\n", gStats[ kStatAudioUnderrun ] );
+	fprintf( fh, "# Hottest 256 byte blocks (a function or loop usually lives in one or two):\n" );
+	for( size_t i = 0; i < blocks.size() && i < 30; ++i )
+		fprintf( fh, "  block %08x  %10u  %5.1f%%\n", blocks[ i ].pc, blocks[ i ].count, 100.0 * blocks[ i ].count / (double)total );
+	fprintf( fh, "# Hottest single addresses:\n" );
+	for( size_t i = 0; i < all.size() && i < 40; ++i )
+		fprintf( fh, "  %08x  %10u  %5.1f%%\n", all[ i ].pc, all[ i ].count, 100.0 * all[ i ].count / (double)total );
+	fclose( fh );
+}
+
 void NoteFallbackSite( u32 op_code_bits )
 {
 	FallbackStats & stats = gFallbacks[ FallbackKey( op_code_bits ) ];
@@ -367,6 +433,10 @@ void OpenGame()
 	gPending += ",interp_ops,fallback_ops\n";
 
 	gFallbacks.clear();
+	memset( gPcKey, 0, sizeof( gPcKey ) );
+	memset( gPcCount, 0, sizeof( gPcCount ) );
+	memset( gStats, 0, sizeof( gStats ) );
+	gPcUsed = 0;
 	gFallbackPath = dir / ( SafeFileName( g_ROM.settings.GameName ) + crc + "_fallbacks.txt" );
 	gInterpretedOps = 0;
 	gFallbackOps = 0;
@@ -431,6 +501,7 @@ void EndFrame()
 	{
 		Push( kLogIo );
 		WriteFallbacks();
+		WriteInterpretedHot();
 		Pop();
 	}
 }
@@ -464,6 +535,7 @@ void CloseGame()
 
 	Flush();
 	WriteFallbacks();
+	WriteInterpretedHot();
 	gFallbackPath.clear();
 	gActive = false;
 

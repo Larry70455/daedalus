@@ -137,3 +137,46 @@ Requested test: install the `DaedalusX64-PSP-PerfLog` build, play Mario 64 for
 about two minutes in a 3D area with Audio set to Async, then Sync, then
 Disabled (ROM settings screen), quit through the pause menu, and send the
 `PerfLogs` folder with notes on sound quality and speed.
+
+
+## 8. Results of the first execution round (PPSSPP, limiter off, audio off)
+
+Emulated time per N64 frame, same instrumentation before and after each step.
+
+| Step | Mario 64 | Smash Bros | Checked by |
+|---|---|---|---|
+| Baseline | 6545 us | 11302 us | |
+| Restore VFPU matrix multiply | 6503 us | 11121 us | state identical (600 frames), screenshots pixel identical at 4 frame counts |
+| Native LDC1/SDC1 | 6456 us | 10677 us | state and all RAM identical (600 frames), registers and FPU identical (3000 frames) |
+| Total | about 1.4% faster | about 5.5% faster | |
+
+Findings that change the plan:
+
+- **The average hides a heavy tail.** Median frame is 2.8 ms (Mario) and 7.0 ms
+  (Smash) but the 99th percentile is 19.7 ms and 50 ms, and 15% of Smash frames
+  exceed the 16.7 ms budget. The spikes are what cause stutter and audio
+  crackle, not the average.
+- **Spike frames are cold code being interpreted**, not compiling: Smash spike
+  frames run about 26,000 interpreted instructions (normal frames 5,000), costing
+  about 8.7 ms, while code generation is only 1.5 ms of that. Compiling is 2 to
+  5% of total time.
+- **The code cache is thrown away completely 28 times in 3000 frames (Mario) and
+  15 times (Smash)**: 3 from the CACHE instruction and the rest from writes that
+  overlap compiled code. Each flush forces everything to be recompiled.
+  Dropping only the overlapping fragments, instead of everything, is the best
+  candidate for the next round, but fragments may be linked to each other, so it
+  needs care.
+- **Lowering the "hot" threshold (10 executions before compiling) is not safe.**
+  At 4, Mario crashes inside generated code: compiling sooner exposes a latent
+  bug where a load is assumed to be in fast RAM from too few observations.
+- **Audio buffer:** 2048 samples (46 ms) ran dry whenever a frame took longer.
+  In Sync mode over 40 seconds, underruns fell from 31 to 6 (Mario) with 4096
+  samples. Smash stays at about 420 because in Sync mode it is simply too slow;
+  only moving audio to the Media Engine fixes that.
+- The `memmove` entry seen earlier was `memcmp` (texture info comparisons) and is
+  negligible.
+
+Not done yet: block linking (step 2), wider idle loop detection (4), display
+list handler tuning (6), Media Engine audio by default (7, needs hardware),
+per game cycle scaling (8), and the April 2023 comparison (9, that source does
+not run in PPSSPP).

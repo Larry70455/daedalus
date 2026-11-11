@@ -29,6 +29,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "Utility/PerfLog.h"
 #ifdef DAEDALUS_PSP
+#include <pspkernel.h>
 #include "SysPSP/Utility/CacheUtil.h"
 #endif
 
@@ -147,7 +148,13 @@ fh.flush();
       // We might want to put a Sleep in when executing on the SC?
       // Give time to other threads when using SYNC mode.
       // ThreadYield();
-
+#ifdef DAEDALUS_PSP
+      // Sleep a little instead of spinning flat out: the spin keeps reading
+      // uncached memory, which wastes battery and steals memory bus
+      // bandwidth from the GPU and the Media Engine. 200 us is far below the
+      // buffer length, so this cannot cause an underrun by itself.
+      sceKernelDelayThread(200);
+#endif
       read_ptr = mReadPtr;
     }
 #ifdef DAEDALUS_PERF_LOG
@@ -189,6 +196,11 @@ u32 CAudioBuffer::Drain(Sample *samples, u32 num_samples) {
       read_ptr = mBufferBegin;
 
     samples_required--;
+  }
+
+  if (samples_required > 0)
+  {
+    DAEDALUS_PERF_STAT( kStatAudioUnderrun );	// No-op unless DAEDALUS_PERF_LOG
   }
 
 #ifdef DAEDALUS_DEBUG_AUDIO

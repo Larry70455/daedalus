@@ -19,6 +19,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 
 #include "Base/Types.h"
+#include "Utility/PerfLog.h"
 
 
 #include "Core/CPU.h"			// For dubious use of PC/NewPC
@@ -325,6 +326,7 @@ CFragment *		CTraceRecorder::CreateFragment( std::shared_ptr<CCodeBufferManager>
 
 void	CTraceRecorder::AbortTrace()
 {
+	DAEDALUS_PERF_STAT( kStatTraceAborted );	// No-op unless DAEDALUS_PERF_LOG
 	#ifdef DAEDALUS_ENABLE_ASSERTS
 	DAEDALUS_PROFILE( "CTraceRecorder::AbortTrace" );
 #endif

@@ -102,7 +102,7 @@ static bool audio_open = false;
 
 
 // Large kAudioBufferSize creates huge delay on sound //Corn
-static const u32	kAudioBufferSize = 1024 * 2; // OSX uses a circular buffer length, 1024 * 1024
+static const u32	kAudioBufferSize = 4096;	// About 92 ms. 2048 (46 ms) ran dry whenever one frame took longer than that, heard as crackle. Bigger means more audio delay.
 
 
 class AudioPluginPSP : public CAudioPlugin

@@ -63,7 +63,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 static const u32					gMaxFragmentCacheSize = (8192 + 1024); //Maximum amount of fragments in the cache
 static const u32					gMaxHotTraceMapSize = (2048 + TRACE_SIZE);
-static const u32					gHotTraceThreshold = 10;	//How many times interpreter has to loop a trace before it becomes hot and sent to dynarec
+#ifndef DAEDALUS_HOT_TRACE_THRESHOLD
+#define DAEDALUS_HOT_TRACE_THRESHOLD 10
+#endif
+static const u32					gHotTraceThreshold = DAEDALUS_HOT_TRACE_THRESHOLD;	//How many times interpreter has to loop a trace before it becomes hot and sent to dynarec
 
 
 //std::map< u32, u32, std::less<u32>, MyAllocator >				gHotTraceCountMap;
@@ -95,6 +98,7 @@ u32 gFragmentLookupSuccess {};
 //*****************************************************************************
 void  CPU_InvalidateICache()
 {
+	DAEDALUS_PERF_STAT( kStatFlushICache );	// No-op unless DAEDALUS_PERF_LOG
 	CPU_ResetFragmentCache();
 }
 
@@ -117,6 +121,7 @@ void  CPU_InvalidateICacheRange( u32 address, u32 length )
 #ifndef DAEDALUS_SILENT
 		printf( "Write to %08x (%d bytes) overlaps fragment cache entries\n", address, length );
 #endif
+		DAEDALUS_PERF_STAT( kStatFlushOverlap );	// No-op unless DAEDALUS_PERF_LOG
 		CPU_ResetFragmentCache();
 	}
 }
@@ -240,8 +245,8 @@ template < bool DynaRec, bool TraceEnabled > void CPU_Go()
 		u32	stuff_to_do( gCPUState.GetStuffToDo() );
 		while(stuff_to_do == 0)
 		{
+			DAEDALUS_PERF_COUNT_INTERPRETED_OP( gCPUState.CurrentPC );	// No-op unless DAEDALUS_PERF_LOG
 			CPU_EXECUTE_OP< TraceEnabled >();
-			DAEDALUS_PERF_COUNT_INTERPRETED_OP();	// No-op unless DAEDALUS_PERF_LOG
 
 			stuff_to_do = gCPUState.GetStuffToDo();
 		}
@@ -370,7 +375,12 @@ void	CPU_DumpFragmentCache()
 void CPU_CreateAndAddFragment()
 {
 	// std::shared_ptr<CFragment> p_fragment( gTraceRecorder.CreateFragment( gFragmentCache.GetCodeBufferManager() ) );
-	CFragment * p_fragment( gTraceRecorder.CreateFragment( gFragmentCache.GetCodeBufferManager() ) );
+	CFragment * p_fragment( nullptr );
+	{
+		DAEDALUS_PERF_SCOPE( kCompile );	// No-op unless DAEDALUS_PERF_LOG
+		p_fragment = gTraceRecorder.CreateFragment( gFragmentCache.GetCodeBufferManager() );
+	}
+	DAEDALUS_PERF_STAT( kStatFragmentCreated );
 
 	if( p_fragment != nullptr )
 	{
@@ -509,6 +519,7 @@ void CPU_HandleDynaRecOnBranch( bool backwards, bool trace_already_enabled )
 
 					if( gFragmentCache.GetCacheSize() > gMaxFragmentCacheSize)
 					{
+						DAEDALUS_PERF_STAT( kStatFlushSize );
 						gFragmentCache.Clear();
 						gHotTraceCountMap.clear();		// Makes sense to clear this now, to get accurate usage stats
 #ifdef DAEDALUS_ENABLE_OS_HOOKS
@@ -523,6 +534,7 @@ void CPU_HandleDynaRecOnBranch( bool backwards, bool trace_already_enabled )
 						#ifdef DAEDALUS_DEBUG_CONSOLE
 						DBGConsole_Msg( 0, "Hot trace cache hit %d, dumping", gHotTraceCountMap.size() );
 						#endif
+						DAEDALUS_PERF_STAT( kStatFlushHotMap );
 						gHotTraceCountMap.clear();
 						gFragmentCache.Clear();
 #ifdef DAEDALUS_ENABLE_OS_HOOKS
@@ -532,6 +544,7 @@ void CPU_HandleDynaRecOnBranch( bool backwards, bool trace_already_enabled )
 					else if( trace_count == gHotTraceThreshold )
 					{
 						//DBGConsole_Msg( 0, "Identified hot trace at [R%08x]! (size is %d)", gCPUState.CurrentPC, gHotTraceCountMap.size() );
+						DAEDALUS_PERF_STAT( kStatTraceStarted );
 						gTraceRecorder.StartTrace( gCPUState.CurrentPC );
 
 						if(!trace_already_enabled)
