@@ -65,6 +65,9 @@ jobs:
         path: psp-perflog-artifact
 
   build-linux-amd64:
+    # Not needed for the PSP work in this fork: only runs when started by hand
+    # (Actions tab > CI > Run workflow). The PSP jobs run on every push.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v4
@@ -95,6 +98,9 @@ jobs:
         path: DaedalusX64
 
   build-linux-arm64:
+    # Not needed for the PSP work in this fork: only runs when started by hand
+    # (Actions tab > CI > Run workflow). The PSP jobs run on every push.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04-arm
     steps:
     - uses: actions/checkout@v4
@@ -125,6 +131,9 @@ jobs:
 
 
   build-ctr:
+    # Not needed for the PSP work in this fork: only runs when started by hand
+    # (Actions tab > CI > Run workflow). The PSP jobs run on every push.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     container: wally4000/daedalusx64:latest
 
@@ -151,6 +160,9 @@ jobs:
           path: DaedalusX64
 
   build-macos:
+    # Not needed for the PSP work in this fork: only runs when started by hand
+    # (Actions tab > CI > Run workflow). The PSP jobs run on every push.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: macOS-latest
     steps:
     - uses: actions/checkout@v4
@@ -182,6 +194,9 @@ jobs:
         path: DaedalusX64
 
   build-windows:
+    # Not needed for the PSP work in this fork: only runs when started by hand
+    # (Actions tab > CI > Run workflow). The PSP jobs run on every push.
+    if: github.event_name == 'workflow_dispatch'
     # runs-on: windows-latest
     runs-on: ubuntu-24.04
     container: wally4000/daedalus-win:latest
