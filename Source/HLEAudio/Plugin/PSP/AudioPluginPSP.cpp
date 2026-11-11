@@ -246,6 +246,24 @@ EProcessResult	AudioPluginPSP::ProcessAList()
 			{
 #ifdef DAEDALUS_PSP_USE_ME
 				sceKernelDcacheWritebackInvalidateAll();
+				// BeginME fails when the Media Engine is still busy with the
+				// previous audio job. Running Audio_Ucode() here at the same
+				// time would have both CPUs working on the same audio state,
+				// which corrupts the sound (crackling). So first wait for the
+				// Media Engine to finish (it is normally almost done) and
+				// hand it the new job. The wait is bounded so a stuck Media
+				// Engine cannot hang the emulator; only then fall back to
+				// the main CPU as before.
+				if(BeginME( mei, (int)&Audio_Ucode, (int)NULL, -1, NULL, -1, NULL) < 0)
+				{
+					for( u32 spins = 0; spins < 2000000 && !CheckME( mei ); ++spins ) {}
+				}
+				else
+				{
+					result = PR_COMPLETED;
+					break;
+				}
+				sceKernelDcacheWritebackInvalidateAll();
 				if(BeginME( mei, (int)&Audio_Ucode, (int)NULL, -1, NULL, -1, NULL) < 0){
 						Audio_Ucode();
 						result = PR_COMPLETED;

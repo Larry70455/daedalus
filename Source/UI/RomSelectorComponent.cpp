@@ -392,7 +392,7 @@ void IRomSelectorComponent::RenderRomList()
 
 #ifdef DAEDALUS_PSP
 	sceGuEnable(GU_SCISSOR_TEST);
-	sceGuScissor(LIST_TEXT_LEFT, BELOW_MENU_MIN, LIST_TEXT_LEFT+LIST_TEXT_WIDTH, BELOW_MENU_MIN+LIST_TEXT_HEIGHT);
+	sceGuScissor(LIST_TEXT_LEFT, BELOW_MENU_MIN, LIST_TEXT_WIDTH, LIST_TEXT_HEIGHT);	// x, y, width, height (current PSP SDK)
 #endif
 
 	const char * const	ptr_text = "> " ;

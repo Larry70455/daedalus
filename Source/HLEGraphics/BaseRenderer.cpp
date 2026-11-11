@@ -1890,7 +1890,11 @@ void BaseRenderer::SetScissor( u32 x0, u32 y0, u32 x1, u32 y1 )
 	s32 y = static_cast<s32>(mScreenHeight) - (t + h);
 
 #if defined(DAEDALUS_PSP)
-	sceGuScissor(l, y, w, h);
+	// The PSP SDK takes the TOP edge of the region plus width and height
+	// (see pspgu.h). The flipped "y" below is the OpenGL convention (origin
+	// at the bottom) and is wrong here whenever the top and bottom margins
+	// differ.
+	sceGuScissor(l, t, w, h);
 #elif defined(DAEDALUS_GL) || defined(DAEDALUS_CTR) || defined(DAEDALUS_GLES) 
 	// NB: OpenGL is x,y,w,h. Errors if width or height is negative, so clamp this.
 
