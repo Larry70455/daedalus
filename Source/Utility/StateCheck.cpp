@@ -47,6 +47,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 static FILE *	gOut = nullptr;
 static u32		gFramesWanted = 0;
 static u32		gFrame = 0;
+static int		gAudioOverride = -1;	// audio=0|1|2 in statecheck.txt (off, async, sync); -1 keeps the ROM setting
 static bool		gHashRam = true;	// ramhash=0 in statecheck.txt turns the RAM checksum off (for timing runs)
 
 // FNV-1a over 32 bit words. Not cryptographic, only needs to change when the
@@ -109,6 +110,7 @@ bool StateCheck_Start()
 		else if( key == "mode" )		mode = value;
 		else if( key == "frames" )		frames = (u32)std::strtoul( value.c_str(), nullptr, 10 );
 		else if( key == "savestate" )	savestate = value;
+		else if( key == "audio" )		gAudioOverride = std::atoi( value.c_str() );
 		else if( key == "ramhash" )		gHashRam = ( value != "0" );
 	}
 
@@ -134,6 +136,8 @@ bool StateCheck_Start()
 
 	// Override the per ROM preferences that System_Open applied
 	gDynarecEnabled = ( mode == "dynarec" );
+	if( gAudioOverride >= 0 && gAudioOverride <= 2 )
+		gAudioPluginEnabled = static_cast< EAudioPluginMode >( gAudioOverride );
 	gSpeedSyncEnabled = 0;	// No speed limiting: the result must not depend on wall clock time
 
 	std::string out_name = "statecheck_" + mode + ".txt";
