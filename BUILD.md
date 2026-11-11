@@ -46,6 +46,11 @@ You do not need to install anything on your computer to get it.
 When updating to a newer build, you can overwrite everything except
 `SaveGames` and `SaveStates` if you want to keep your saves.
 
+## Measuring performance
+
+To record where the time goes in a game, use the `DaedalusX64-PSP-PerfLog`
+artifact instead. See [PERF_LOG.md](PERF_LOG.md).
+
 ## 3. Building it yourself (optional)
 
 You only need this if you want to build without GitHub. Linux or WSL with
