@@ -26,11 +26,15 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #ifdef DAEDALUS_PERF_LOG
 
 #include "Core/ROM.h"
+#include "Core/R4300OpCode.h"
 #include "Utility/Paths.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <string>
 #include <filesystem>
+#include <unordered_map>
+#include <vector>
 
 #ifdef DAEDALUS_PSP
 #include <pspthreadman.h>
@@ -77,10 +81,183 @@ static u32			gFrameStart = 0;
 static u32			gFrameIndex = 0;
 static u32			gFlipsThisFrame = 0;
 
+u32					gInterpretedOps = 0;
+u32					gFallbackOps = 0;
+
+// Fallback statistics, keyed by the instruction "kind" (see FallbackKey)
+struct FallbackStats
+{
+	u32		Count = 0;		// How many times it ran from recompiled code
+	u32		Sites = 0;		// How many places in recompiled code call it
+	u32		Example = 0;	// One full opcode of this kind, used to print its name
+};
+static std::unordered_map< u32, FallbackStats >	gFallbacks;
+static std::filesystem::path	gFallbackPath;
+static const u32				kFallbackDumpInterval = 600;	// Vertical blanks (about 10 seconds)
+
 // Totals for the summary written when the game is closed
 static u64			gTotalMicros[ kNumCategories ];
 static u64			gTotalFrameMicros = 0;
 static u32			gTotalFlips = 0;
+static u64			gTotalInterpreted = 0;
+static u64			gTotalFallback = 0;
+
+// Reduce an opcode to its "kind" by dropping register numbers and immediates,
+// so all ADD.D instructions are counted together no matter which registers
+// they use. Kept fields: major opcode, plus the sub opcode fields that select
+// the instruction for SPECIAL, REGIMM and the coprocessor groups.
+static u32 FallbackKey( u32 op_bits )
+{
+	OpCode op;
+	op._u32 = op_bits;
+	u32 key = op.op << 16;
+	switch( op.op )
+	{
+	case OP_SPECOP:	key |= op.spec_op; break;
+	case OP_REGIMM:	key |= op.regimm_op; break;
+	case OP_COPRO0:
+	case OP_COPRO1:	key |= ( op.rs << 6 ) | ( op_bits & 0x3f ); break;	// fmt or sub op, plus function field
+	default:		break;
+	}
+	return key;
+}
+
+// Name of the instruction kind, for example "ADD.D". The emulator's own
+// disassembler is compiled out of release builds, so a compact table is kept
+// here. Unknown encodings print as their hex fields.
+static std::string FallbackName( u32 op_bits )
+{
+	static const char * const kMain[ 64 ] =
+	{
+		"SPECIAL","REGIMM","J","JAL","BEQ","BNE","BLEZ","BGTZ",
+		"ADDI","ADDIU","SLTI","SLTIU","ANDI","ORI","XORI","LUI",
+		"COP0","COP1","COP2","?","BEQL","BNEL","BLEZL","BGTZL",
+		"DADDI","DADDIU","LDL","LDR","?","?","?","?",
+		"LB","LH","LWL","LW","LBU","LHU","LWR","LWU",
+		"SB","SH","SWL","SW","SDL","SDR","SWR","CACHE",
+		"LL","LWC1","LWC2","?","LLD","LDC1","LDC2","LD",
+		"SC","SWC1","SWC2","?","SCD","SDC1","SDC2","SD",
+	};
+	static const char * const kSpecial[ 64 ] =
+	{
+		"SLL","?","SRL","SRA","SLLV","?","SRLV","SRAV",
+		"JR","JALR","?","?","SYSCALL","BREAK","?","SYNC",
+		"MFHI","MTHI","MFLO","MTLO","DSLLV","?","DSRLV","DSRAV",
+		"MULT","MULTU","DIV","DIVU","DMULT","DMULTU","DDIV","DDIVU",
+		"ADD","ADDU","SUB","SUBU","AND","OR","XOR","NOR",
+		"?","?","SLT","SLTU","DADD","DADDU","DSUB","DSUBU",
+		"TGE","TGEU","TLT","TLTU","TEQ","?","TNE","?",
+		"DSLL","?","DSRL","DSRA","DSLL32","?","DSRL32","DSRA32",
+	};
+	static const char * const kRegImm[ 32 ] =
+	{
+		"BLTZ","BGEZ","BLTZL","BGEZL","?","?","?","?",
+		"TGEI","TGEIU","TLTI","TLTIU","TEQI","?","TNEI","?",
+		"BLTZAL","BGEZAL","BLTZALL","BGEZALL","?","?","?","?",
+		"?","?","?","?","?","?","?","?",
+	};
+	static const char * const kCopMove[ 16 ] =
+	{
+		"MFC","DMFC","CFC","?","MTC","DMTC","CTC","?",
+		"BC","?","?","?","?","?","?","?",
+	};
+	static const char * const kCop1Funct[ 64 ] =
+	{
+		"ADD","SUB","MUL","DIV","SQRT","ABS","MOV","NEG",
+		"ROUND.L","TRUNC.L","CEIL.L","FLOOR.L","ROUND.W","TRUNC.W","CEIL.W","FLOOR.W",
+		"?","?","?","?","?","?","?","?",
+		"?","?","?","?","?","?","?","?",
+		"CVT.S","CVT.D","?","?","CVT.W","CVT.L","?","?",
+		"?","?","?","?","?","?","?","?",
+		"C.F","C.UN","C.EQ","C.UEQ","C.OLT","C.ULT","C.OLE","C.ULE",
+		"C.SF","C.NGLE","C.SEQ","C.NGL","C.LT","C.NGE","C.LE","C.NGT",
+	};
+
+	OpCode op;
+	op._u32 = op_bits;
+	const u32 funct = op_bits & 0x3f;
+	char buf[ 48 ];
+
+	switch( op.op )
+	{
+	case OP_SPECOP:	return kSpecial[ funct ];
+	case OP_REGIMM:	return kRegImm[ op.regimm_op ];
+	case OP_COPRO0:
+	case OP_COPRO1:
+		{
+			const char * cop = op.op == OP_COPRO0 ? "0" : "1";
+			if( op.rs < 16 )
+				return std::string( kCopMove[ op.rs ] ) + cop;
+			if( op.op == OP_COPRO0 )
+			{
+				snprintf( buf, sizeof( buf ), "COP0.fn%02x", funct );	// TLB ops, ERET
+				return buf;
+			}
+			// Floating point: rs selects the format
+			const char * fmt = "?";
+			switch( op.rs )
+			{
+			case 16: fmt = "S"; break;
+			case 17: fmt = "D"; break;
+			case 20: fmt = "W"; break;
+			case 21: fmt = "L"; break;
+			default: break;
+			}
+			return std::string( kCop1Funct[ funct ] ) + "." + fmt;
+		}
+	default:
+		return kMain[ op.op ];
+	}
+}
+
+static void WriteFallbacks()
+{
+	if( gFallbackPath.empty() )
+		return;
+
+	std::vector< std::pair< u32, FallbackStats > > list( gFallbacks.begin(), gFallbacks.end() );
+	std::sort( list.begin(), list.end(), []( const auto & a, const auto & b ) { return a.second.Count > b.second.Count; } );
+
+	u64 total = 0;
+	for( const auto & it : list )
+		total += it.second.Count;
+
+	FILE * fh = fopen( gFallbackPath.string().c_str(), "w" );
+	if( fh == nullptr )
+		return;
+
+	fprintf( fh, "# Interpreter fallbacks from recompiled code for \"%s\" (crc %08x)\n",
+			 g_ROM.settings.GameName.c_str(), g_ROM.mRomID.CRC[ 0 ] );
+	fprintf( fh, "# after %u vertical blanks. count = times executed, sites = places in recompiled code\n", gFrameIndex );
+	fprintf( fh, "# %-12s %12s %7s %7s  %s\n", "instruction", "count", "share", "sites", "example opcode" );
+	for( const auto & it : list )
+	{
+		fprintf( fh, "  %-12s %12u %6.1f%% %7u  0x%08x\n", FallbackName( it.second.Example ).c_str(), it.second.Count,
+				 total > 0 ? 100.0 * f64( it.second.Count ) / f64( total ) : 0.0, it.second.Sites, it.second.Example );
+	}
+	fclose( fh );
+}
+
+void NoteFallbackSite( u32 op_code_bits )
+{
+	FallbackStats & stats = gFallbacks[ FallbackKey( op_code_bits ) ];
+	stats.Sites++;
+	stats.Example = op_code_bits;
+}
+
+// Recompiled code calls this instead of the interpreter handler when the
+// perf log is enabled. It counts the instruction and then runs the real
+// handler, so the emulated result is the same; only slower.
+void FallbackThunk( u32 op_code_bits, void ( *handler )( u32 ) )
+{
+	gFallbackOps++;
+	FallbackStats & stats = gFallbacks[ FallbackKey( op_code_bits ) ];
+	stats.Count++;
+	if( stats.Example == 0 )
+		stats.Example = op_code_bits;
+
+	handler( op_code_bits );
+}
 
 static inline Category Current()
 {
@@ -187,12 +364,19 @@ void OpenGame()
 		gPending += ',';
 		gPending += kCategoryNames[ i ];
 	}
-	gPending += '\n';
+	gPending += ",interp_ops,fallback_ops\n";
+
+	gFallbacks.clear();
+	gFallbackPath = dir / ( SafeFileName( g_ROM.settings.GameName ) + crc + "_fallbacks.txt" );
+	gInterpretedOps = 0;
+	gFallbackOps = 0;
 
 	for( u32 i = 0; i < kNumCategories; ++i )
 		gTotalMicros[ i ] = 0;
 	gTotalFrameMicros = 0;
 	gTotalFlips = 0;
+	gTotalInterpreted = 0;
+	gTotalFallback = 0;
 	gFrameIndex = 0;
 	gDepth = 0;
 	gOverflow = 0;
@@ -224,8 +408,14 @@ void EndFrame()
 		len += snprintf( line + len, sizeof( line ) - len, ",%u", gFrameMicros[ i ] );
 		gTotalMicros[ i ] += gFrameMicros[ i ];
 	}
+	if( len > 0 && len < (int)sizeof( line ) )
+		snprintf( line + len, sizeof( line ) - len, ",%u,%u", gInterpretedOps, gFallbackOps );
 	gPending += line;
 	gPending += '\n';
+	gTotalInterpreted += gInterpretedOps;
+	gTotalFallback += gFallbackOps;
+	gInterpretedOps = 0;
+	gFallbackOps = 0;
 
 	gTotalFrameMicros += total;
 	gTotalFlips += gFlipsThisFrame;
@@ -236,6 +426,13 @@ void EndFrame()
 	// Write after resetting, so the write lands in the next line's log_io column
 	if( gPending.size() >= kFlushThreshold )
 		Flush();
+
+	if( ( gFrameIndex % kFallbackDumpInterval ) == 0 )
+	{
+		Push( kLogIo );
+		WriteFallbacks();
+		Pop();
+	}
 }
 
 void CloseGame()
@@ -259,9 +456,15 @@ void CloseGame()
 					  100.0 * f64( gTotalMicros[ i ] ) / f64( gTotalFrameMicros ) );
 			gPending += line;
 		}
+
+		snprintf( line, sizeof( line ), "# summary: interpreted ops avg %.0f, fallback ops avg %.0f per vertical blank\n",
+				  f64( gTotalInterpreted ) / f64( gFrameIndex ), f64( gTotalFallback ) / f64( gFrameIndex ) );
+		gPending += line;
 	}
 
 	Flush();
+	WriteFallbacks();
+	gFallbackPath.clear();
 	gActive = false;
 
 	if( gFile != nullptr )

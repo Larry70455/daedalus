@@ -38,6 +38,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "Base/Macros.h"
 #include "Debug/PrintOpCode.h"
 #include "Utility/Profiler.h"
+#include "Utility/PerfLog.h"
 
 using namespace AssemblyUtils;
 
@@ -1795,18 +1796,41 @@ void	CCodeGeneratorPSP::GenerateGenericR4300( OpCode op_code, CPU_Instruction p_
 	PspOpCode	op1;
 	PspOpCode	op2;
 
+	// The function the generated code will call
+	const void * call_target = reinterpret_cast< const void * >( p_instruction );
+
+#ifdef DAEDALUS_PERF_LOG
+	// Measurement build only (DAEDALUS_PERF_LOG). Normal builds skip this block,
+	// so the code generated there is exactly as before.
+	// Instead of calling the interpreter handler directly, call a small counting
+	// wrapper and pass the real handler in A1. The wrapper counts the
+	// instruction and then calls the handler with the same opcode in A0, so the
+	// emulated result does not change. A1 is free here: all cached registers
+	// were flushed above, and A1 is not preserved across a call anyway.
+	PerfLog::NoteFallbackSite( op_code._u32 );
+	{
+		PspOpCode	h1;
+		PspOpCode	h2;
+		GetLoadConstantOps( PspReg_A1, reinterpret_cast< u32 >( p_instruction ), &h1, &h2 );
+		AppendOp( h1 );
+		if( h2._u32 != 0 )
+			AppendOp( h2 );
+	}
+	call_target = reinterpret_cast< const void * >( &PerfLog::FallbackThunk );
+#endif
+
 	// Load the opcode in to A0
 	GetLoadConstantOps( PspReg_A0, op_code._u32, &op1, &op2 );
 
 	if( op2._u32 == 0 )
 	{
-		JAL( CCodeLabel( reinterpret_cast< const void * >( p_instruction ) ), false );		// No branch delay
+		JAL( CCodeLabel( call_target ), false );		// No branch delay
 		AppendOp( op1 );
 	}
 	else
 	{
 		AppendOp( op1 );
-		JAL( CCodeLabel( reinterpret_cast< const void * >( p_instruction ) ), false );		// No branch delay
+		JAL( CCodeLabel( call_target ), false );		// No branch delay
 		AppendOp( op2 );
 	}
 }

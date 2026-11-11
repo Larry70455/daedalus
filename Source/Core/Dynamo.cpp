@@ -241,6 +241,7 @@ template < bool DynaRec, bool TraceEnabled > void CPU_Go()
 		while(stuff_to_do == 0)
 		{
 			CPU_EXECUTE_OP< TraceEnabled >();
+			DAEDALUS_PERF_COUNT_INTERPRETED_OP();	// No-op unless DAEDALUS_PERF_LOG
 
 			stuff_to_do = gCPUState.GetStuffToDo();
 		}

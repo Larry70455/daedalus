@@ -33,7 +33,13 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //     <emulator folder>/PerfLogs/<Game Name>_<CRC>.csv
 //   Lines are kept in memory and written in batches so the Memory Stick write
 //   does not disturb the measurement much. The time spent writing is itself
-//   reported in the "log_io" column.
+//   reported in the "log_io" column. Two more columns count how many N64
+//   instructions ran in the plain interpreter and how many were interpreter
+//   fallbacks called from recompiled code.
+//
+//   A second file, <Game Name>_<CRC>_fallbacks.txt, lists which instructions
+//   the dynarec hands back to the interpreter, sorted by how often they ran.
+//   It is rewritten every 600 vertical blanks and when the game is closed.
 //
 // When DAEDALUS_PERF_LOG is not defined (the normal build) every macro below
 // expands to nothing, so there is zero cost.
@@ -69,6 +75,15 @@ namespace PerfLog
 	void	EndFrame();		// Call once per N64 vertical blank
 	void	NoteFlip();		// Call when the game presents a new image
 
+	// Interpreter fallback counting (see FallbackThunk in PerfLog.cpp).
+	// gInterpretedOps counts ops run by the plain interpreter loop (code that
+	// is not, or not yet, recompiled). gFallbackOps counts ops that recompiled
+	// code could not translate and handed back to an interpreter function.
+	extern u32 gInterpretedOps;
+	extern u32 gFallbackOps;
+	void	NoteFallbackSite( u32 op_code_bits );	// Called by the dynarec when it emits a fallback call
+	void	FallbackThunk( u32 op_code_bits, void ( *handler )( u32 ) );	// Called from generated code
+
 	struct Scope
 	{
 		explicit Scope( Category category )	{ Push( category ); }
@@ -85,6 +100,7 @@ namespace PerfLog
 #define DAEDALUS_PERF_CLOSE_GAME()			PerfLog::CloseGame()
 #define DAEDALUS_PERF_END_FRAME()			PerfLog::EndFrame()
 #define DAEDALUS_PERF_NOTE_FLIP()			PerfLog::NoteFlip()
+#define DAEDALUS_PERF_COUNT_INTERPRETED_OP()	( PerfLog::gInterpretedOps++ )
 
 #else
 
@@ -93,6 +109,7 @@ namespace PerfLog
 #define DAEDALUS_PERF_CLOSE_GAME()			do {} while( 0 )
 #define DAEDALUS_PERF_END_FRAME()			do {} while( 0 )
 #define DAEDALUS_PERF_NOTE_FLIP()			do {} while( 0 )
+#define DAEDALUS_PERF_COUNT_INTERPRETED_OP()	do {} while( 0 )
 
 #endif // DAEDALUS_PERF_LOG
 

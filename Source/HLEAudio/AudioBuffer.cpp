@@ -131,10 +131,13 @@ fh.flush();
     if (write_ptr >= mBufferEnd)
       write_ptr = mBufferBegin;
 
-    // The extra "if" only exists so the perf log can time the wait below.
-    // Behaviour is unchanged: the loop runs exactly as before.
+#ifdef DAEDALUS_PERF_LOG
+    // Measurement build only: the extra "if" lets the perf log time the wait
+    // below. The loop itself runs exactly as before. Normal builds compile
+    // the original code with no "if".
     if (write_ptr == read_ptr) {
-    DAEDALUS_PERF_SCOPE( kAudioWait );	// No-op unless DAEDALUS_PERF_LOG
+    DAEDALUS_PERF_SCOPE( kAudioWait );
+#endif
     while (write_ptr == read_ptr) {
       // The buffer is full - spin until the read pointer advances.
       //    Note - spends a lot of time here if program is running
@@ -147,7 +150,9 @@ fh.flush();
 
       read_ptr = mReadPtr;
     }
+#ifdef DAEDALUS_PERF_LOG
     }
+#endif
 
     *write_ptr = out;
   }

@@ -36,6 +36,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "Base/Macros.h"
 #include "Utility/Profiler.h"
 #include "Debug/Synchroniser.h"
+#include "Utility/PerfLog.h"
 
 //*****************************************************************************
 //	Execute a single MIPS op. The conditionals for the templated arguments
@@ -145,6 +146,7 @@ void CPU_Go()
 		while(stuff_to_do == 0)
 		{
 			CPU_EXECUTE_OP< false >();
+			DAEDALUS_PERF_COUNT_INTERPRETED_OP();	// No-op unless DAEDALUS_PERF_LOG
 
 			stuff_to_do = gCPUState.GetStuffToDo();
 		}
