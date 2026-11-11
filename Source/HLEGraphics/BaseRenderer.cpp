@@ -578,8 +578,11 @@ void BaseRenderer::FlushTris()
 //Croping triangles just outside the NDC box and let PSP HW do the final crop
 //improves quality but fails in some games (Rocket Robot/Lego racers)//Corn
 //*****************************************************************************
-// ALIGNED_TYPE(const v4, NDCPlane[6], 16) =
-std::array<const glm::vec4, 6> NDCPlane = 
+// Must be 16 byte aligned: the PSP VFPU clipping code (_ClipToHyperPlane in
+// VectorClipping.S) reads these planes with lv.q, which faults on a
+// misaligned address. The old v4 type was aligned by itself; glm::vec4 is
+// not, so the alignment is stated here explicitly.
+alignas(16) std::array<const glm::vec4, 6> NDCPlane = 
 {
 	glm::vec4(  0.f,  0.f, -1.f, -1.f ),	// near
 	glm::vec4(  0.f,  0.f,  1.f, -1.f ),	// far
