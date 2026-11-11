@@ -45,6 +45,28 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "Utility/PerfLog.h"
 #ifdef DAEDALUS_PSP
 #include "SysPSP/Math/Math.h"
+#endif
+
+// out = a * b for glm (column major) matrices.
+// On the PSP the whole 4x4 product is one VFPU instruction instead of 64
+// scalar multiplies. This is the routine the code used before the move to
+// GLM. The operands are swapped because the old matrix class stored its
+// data transposed; the order was checked numerically (VFPU result equals
+// glm::operator* to within float rounding, 200 random matrices).
+// All operands must be 16 byte aligned (they are the alignas members below).
+// out may be the same object as a or b: all inputs are loaded first.
+#ifdef DAEDALUS_PSP_USE_VFPU
+static inline void MatMul( glm::mat4 & out, const glm::mat4 & a, const glm::mat4 & b )
+{
+	__asm__ volatile (
+		"lv.q   R000, 0(%1)\n lv.q   R001, 16(%1)\n lv.q   R002, 32(%1)\n lv.q   R003, 48(%1)\n"
+		"lv.q   R100, 0(%2)\n lv.q   R101, 16(%2)\n lv.q   R102, 32(%2)\n lv.q   R103, 48(%2)\n"
+		"vmmul.q   M200, M000, M100\n"
+		"sv.q   R200, 0(%0)\n sv.q   R201, 16(%0)\n sv.q   R202, 32(%0)\n sv.q   R203, 48(%0)\n"
+		: : "r" (&out), "r" (&b), "r" (&a) : "memory" );
+}
+#else
+static inline void MatMul( glm::mat4 & out, const glm::mat4 & a, const glm::mat4 & b ) { out = a * b; }
 #endif 
 
 #ifdef DAEDALUS_CTR
@@ -1932,7 +1954,7 @@ void BaseRenderer::SetProjection(const u32 address, bool bReplace)
 	else
 	{
 		MatrixFromN64FixedPoint( mTempMat, address);
-		mProjectionMat *= mTempMat;
+		MatMul( mProjectionMat, mProjectionMat, mTempMat );
 	}
 
 	mWorldProjectValid = false;
@@ -1962,7 +1984,7 @@ void BaseRenderer::SetDKRMat(const u32 address, bool mul, u32 idx)
 	if( mul )
 	{
 		MatrixFromN64FixedPoint( mTempMat, address );
-		mModelViewStack[idx] = mTempMat * mModelViewStack[0];
+		MatMul( mModelViewStack[idx], mTempMat, mModelViewStack[0] );
 	}
 	else
 	{
@@ -2006,7 +2028,7 @@ void BaseRenderer::SetWorldView(const u32 address, bool bPush, bool bReplace)
 		else	// Multiply ModelView matrix
 		{
 			MatrixFromN64FixedPoint( mTempMat, address);
-			mModelViewStack[mModelViewTop] = mModelViewStack[mModelViewTop - 1] * mTempMat;
+			MatMul( mModelViewStack[mModelViewTop], mModelViewStack[mModelViewTop - 1], mTempMat );
 		}
 	}
 	else	// NoPush
@@ -2020,7 +2042,7 @@ void BaseRenderer::SetWorldView(const u32 address, bool bPush, bool bReplace)
 		{
 			// Multiply ModelView matrix
 			MatrixFromN64FixedPoint( mTempMat, address);
-			mModelViewStack[mModelViewTop] *= mTempMat;
+			MatMul( mModelViewStack[mModelViewTop], mModelViewStack[mModelViewTop], mTempMat );
 		}
 	}
 
@@ -2052,7 +2074,7 @@ inline void BaseRenderer::UpdateWorldProject()
 			mReloadProj = false;
 			sceGuSetMatrix( GU_PROJECTION, reinterpret_cast< const ScePspFMatrix4 * >( &mProjectionMat) );
 		}
-		mWorldProject = mProjectionMat * mModelViewStack[mModelViewTop];
+		MatMul( mWorldProject, mProjectionMat, mModelViewStack[mModelViewTop] );
 	}
 
 	//If WoldProjectmatrix has been modified due to insert or force matrix (Kirby, SSB / Tarzan, Rayman2, Donald duck, SW racer, Robot on wheels)
@@ -2106,7 +2128,7 @@ void BaseRenderer::InsertMatrix(u32 w0, u32 w1)
 	//Make sure WP matrix is up to date before changing WP matrix
 	if( !mWorldProjectValid )
 	{
-		mWorldProject = mProjectionMat * mModelViewStack[mModelViewTop];
+		MatMul( mWorldProject, mProjectionMat, mModelViewStack[mModelViewTop] );
 		mWorldProjectValid = true;
 	}
 
