@@ -54,6 +54,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "Debug/Synchroniser.h"
 #include "System/Thread/Thread.h"
 #include "Utility/PerfLog.h"
+#include "Utility/StateCheck.h"
 
 
 
@@ -668,6 +669,9 @@ void CPU_HANDLE_COUNT_INTERRUPT()
 
 			// One perf log line per vertical blank (no-op unless DAEDALUS_PERF_LOG)
 			DAEDALUS_PERF_END_FRAME();
+
+			// Interpreter vs dynarec state dump (no-op unless DAEDALUS_STATE_CHECK)
+			DAEDALUS_STATE_CHECK_VBL();
 
 			Memory_MI_SetRegisterBits(MI_INTR_REG, MI_INTR_VI);
 			R4300_Interrupt_UpdateCause3();

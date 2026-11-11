@@ -8,6 +8,7 @@ add_library(Utility OBJECT
                             MemoryHeap.cpp  
                             Paths.cpp
                             PerfLog.cpp
+                            StateCheck.cpp
                             Profiler.cpp  
                             Stream.cpp 
                             StringUtil.cpp

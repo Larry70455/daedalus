@@ -68,6 +68,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "System/Thread/Thread.h"
 #include "Utility/Translate.h"
 #include "Utility/Timer.h"
+#include "Utility/StateCheck.h"
 
 
 #include <filesystem>
@@ -231,6 +232,17 @@ int main(int argc, char* argv[])
 		{
 			printf("Loading %s\n", argv[1] );
 			System_Open( argv[1] );
+			CPU_Run();
+			System_Close();
+			System_Finalize();
+			return 0;
+		}
+#endif
+#ifdef DAEDALUS_STATE_CHECK
+		// Correctness check build: if statecheck.txt exists, run that ROM
+		// without the menu. StateCheck exits the program when it is done.
+		if( StateCheck_Start() )
+		{
 			CPU_Run();
 			System_Close();
 			System_Finalize();

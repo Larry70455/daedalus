@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "Interface/RomDB.h"
 #include "System/SystemInit.h"
 #include "Utility/BatchTest.h"
+#include "Utility/StateCheck.h"
 #include "Graphics/GraphicsContext.h"
 #include "Interface/ConfigOptions.h"
 #include "Interface/Preferences.h"
@@ -163,6 +164,17 @@ int main(int argc, char **argv)
 	}
 
 	// Now fullscreen mode has been set before System_Init()
+
+#ifdef DAEDALUS_STATE_CHECK
+	// Correctness check build: if statecheck.txt exists, run that ROM without
+	// the menu. StateCheck exits the program when it is done.
+	if (StateCheck_Start())
+	{
+		CPU_Run();
+		System_Close();
+		return 0;
+	}
+#endif
 
 	if (batch_test)
 	{
