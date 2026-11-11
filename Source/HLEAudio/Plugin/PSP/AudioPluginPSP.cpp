@@ -49,11 +49,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "Utility/FramerateLimiter.h"
 #include "System/Thread/Thread.h"
 
+#include "Utility/PerfLog.h"
 #ifdef DAEDALUS_PSP_USE_ME
 
 #include "SysPSP/PRX/MediaEngine/me.h"
 #include "SysPSP/Utility/ModulePSP.h"
-#include "Utility/PerfLog.h"
 
 bool gLoadedMediaEnginePRX {false};
 

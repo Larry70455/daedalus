@@ -27,9 +27,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <cstring>
 #include <fstream>
 
+#include "Utility/PerfLog.h"
 #ifdef DAEDALUS_PSP
 #include "SysPSP/Utility/CacheUtil.h"
-#include "Utility/PerfLog.h"
 #endif
 
 CAudioBuffer::CAudioBuffer(u32 buffer_size)
