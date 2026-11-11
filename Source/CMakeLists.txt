@@ -109,6 +109,7 @@ else()
 	option(DAEDALUS_PROFILE_EXECUTION "Keep track of various execution stats" OFF)
 	option(DUMPOSFUNCTIONS "Dump OSHLE Functions" OFF)
 	option(DAEDALUS_FRAMERATE_ANALYSIS "Output a CSV file containing framerate analysis" OFF)
+	option(DAEDALUS_PERF_LOG "Write per frame timings (dynarec, display list, textures, GPU and audio waits) to PerfLogs/<game>.csv" OFF)
 	option(DAEDALUS_DEBUG_AUDIO "Output some Audio Samples to raw file" OFF)
 
 

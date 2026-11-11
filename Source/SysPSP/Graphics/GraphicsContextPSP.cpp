@@ -39,6 +39,7 @@
 #include "Interface/Preferences.h"
 #include "Utility/Profiler.h"
 #include "Utility/VolatileMem.h"
+#include "Utility/PerfLog.h"
 
 
 constexpr std::string gScreenDumpDumpPathFormat = "sd{}.png";
@@ -300,7 +301,10 @@ void IGraphicsContext::UpdateFrame( bool wait_for_vbl )
 	#endif
 	}
 
-	sceGuSync(0,0);
+	{
+		DAEDALUS_PERF_SCOPE( kGpuWait );	// No-op unless DAEDALUS_PERF_LOG
+		sceGuSync(0,0);
+	}
 
 	//Used for GUI menu to slow things down, in game we skip this
 	if(wait_for_vbl)

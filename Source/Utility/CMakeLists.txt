@@ -7,6 +7,7 @@ add_library(Utility OBJECT
                             IniFile.cpp 
                             MemoryHeap.cpp  
                             Paths.cpp
+                            PerfLog.cpp
                             Profiler.cpp  
                             Stream.cpp 
                             StringUtil.cpp

@@ -29,6 +29,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #ifdef DAEDALUS_PSP
 #include "SysPSP/Utility/CacheUtil.h"
+#include "Utility/PerfLog.h"
 #endif
 
 CAudioBuffer::CAudioBuffer(u32 buffer_size)
@@ -130,6 +131,10 @@ fh.flush();
     if (write_ptr >= mBufferEnd)
       write_ptr = mBufferBegin;
 
+    // The extra "if" only exists so the perf log can time the wait below.
+    // Behaviour is unchanged: the loop runs exactly as before.
+    if (write_ptr == read_ptr) {
+    DAEDALUS_PERF_SCOPE( kAudioWait );	// No-op unless DAEDALUS_PERF_LOG
     while (write_ptr == read_ptr) {
       // The buffer is full - spin until the read pointer advances.
       //    Note - spends a lot of time here if program is running
@@ -141,6 +146,7 @@ fh.flush();
       // ThreadYield();
 
       read_ptr = mReadPtr;
+    }
     }
 
     *write_ptr = out;

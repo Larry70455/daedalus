@@ -53,6 +53,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "Debug/PrintOpCode.h"
 #include "Debug/Synchroniser.h"
 #include "System/Thread/Thread.h"
+#include "Utility/PerfLog.h"
 
 
 
@@ -664,6 +665,9 @@ void CPU_HANDLE_COUNT_INTERRUPT()
 			gVerticalInterrupts++;
 
 			FramerateLimiter_Limit();
+
+			// One perf log line per vertical blank (no-op unless DAEDALUS_PERF_LOG)
+			DAEDALUS_PERF_END_FRAME();
 
 			Memory_MI_SetRegisterBits(MI_INTR_REG, MI_INTR_VI);
 			R4300_Interrupt_UpdateCause3();

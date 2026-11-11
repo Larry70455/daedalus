@@ -44,6 +44,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "Utility/Profiler.h"
 
 #include <array>
+#include "Utility/PerfLog.h"
 
 static std::vector<u8>		gTexelBuffer;
 // std::array<NativePf8888, 256> gPaletteBuffer;
@@ -155,6 +156,7 @@ static bool GenerateTexels(void ** p_texels,
 
 static void UpdateTexture( const TextureInfo & ti, std::shared_ptr<CNativeTexture> texture )
 {
+	DAEDALUS_PERF_SCOPE( kTexture );	// No-op unless DAEDALUS_PERF_LOG
 	#ifdef DAEDALUS_PROFILE
 	DAEDALUS_PROFILE( "Texture Conversion" );
 	#endif

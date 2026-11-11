@@ -60,6 +60,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include <array>
 #include <memory>
+#include "Utility/PerfLog.h"
 
 
 std::unique_ptr<CGraphicsPlugin> gGraphicsPlugin;
@@ -251,11 +252,13 @@ bool System_Open(const std::filesystem::path &filename)
 		}
 	}
 
+	DAEDALUS_PERF_OPEN_GAME();	// Start the per game perf log (no-op unless DAEDALUS_PERF_LOG)
 	return true;
 }
 
 void System_Close()
 {
+	DAEDALUS_PERF_CLOSE_GAME();	// Write the summary and close the file (no-op unless DAEDALUS_PERF_LOG)
 	for(s32 i = gRomInitTable.size() - 1 ; i >= 0; i--)
 	{
 		const RomEntityEntry & entry = gRomInitTable[i];

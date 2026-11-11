@@ -285,6 +285,7 @@ extern u32 uViHeight;
 #include "uCodes/Ucode_Beta.h"
 #include "uCodes/Ucode_Sprite2D.h"
 #include "uCodes/Ucode_S2DEX.h"
+#include "Utility/PerfLog.h"
 
 //////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////
@@ -467,6 +468,7 @@ static u32 DLParser_ProcessDList(u32 instruction_limit)
 u32 DLParser_Process(u32 instruction_limit, DLDebugOutput * debug_output)
 {
 	DAEDALUS_PROFILE( "DLParser_Process" );
+	DAEDALUS_PERF_SCOPE( kDisplayList );	// No-op unless DAEDALUS_PERF_LOG
 
 	if ( !CGraphicsContext::Get()->IsInitialised() || !gRenderer )
 	{

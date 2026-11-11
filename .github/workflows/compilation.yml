@@ -45,6 +45,25 @@ jobs:
         name: DaedalusX64-PSP
         path: psp-artifact
 
+    # Second PSP build with the per frame performance log switched on.
+    # This is only for measuring; it is a little slower than the normal build.
+    # It reuses the PRX plugins built above and writes to its own folders.
+    - name: Compile PSP perf log build
+      run: |
+        psp-cmake -DCMAKE_BUILD_TYPE=Release -DDAEDALUS_PERF_LOG=ON -S . -B build-perflog
+        cmake --build build-perflog -j$(getconf _NPROCESSORS_ONLN)
+        cmake --install build-perflog --prefix psp-perflog-artifact
+        rm -f psp-perflog-artifact/DaedalusX64/daedalus.prx
+        test -f psp-perflog-artifact/DaedalusX64/EBOOT.PBP
+        echo "commit: ${GITHUB_SHA} (DAEDALUS_PERF_LOG=ON)" > psp-perflog-artifact/DaedalusX64/BUILD_INFO.txt
+
+    - name: Upload perf log artifact
+      if: ${{ success() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: DaedalusX64-PSP-PerfLog
+        path: psp-perflog-artifact
+
   build-linux-amd64:
     runs-on: ubuntu-24.04
     steps:

@@ -53,6 +53,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "SysPSP/PRX/MediaEngine/me.h"
 #include "SysPSP/Utility/ModulePSP.h"
+#include "Utility/PerfLog.h"
 
 bool gLoadedMediaEnginePRX {false};
 
@@ -231,6 +232,7 @@ void	AudioPluginPSP::LenChanged()
 
 EProcessResult	AudioPluginPSP::ProcessAList()
 {
+	DAEDALUS_PERF_SCOPE( kAudioHle );	// No-op unless DAEDALUS_PERF_LOG
 	Memory_SP_SetRegisterBits(SP_STATUS_REG, SP_STATUS_HALT);
 
 	EProcessResult	result = PR_NOT_STARTED;

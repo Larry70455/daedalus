@@ -38,6 +38,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <pspdebug.h>
 
 #include "Core/Memory.h"
+#include "Utility/PerfLog.h"
 
 
 extern void battery_warning();
@@ -192,6 +193,7 @@ void CGraphicsPluginImpl::UpdateScreen()
 
 	if( current_origin != last_origin )
 	{
+		DAEDALUS_PERF_NOTE_FLIP();	// No-op unless DAEDALUS_PERF_LOG
 		//printf( "Flip (%08x, %08x)\n", current_origin, last_origin );
 		if( gGlobalPreferences.DisplayFramerate )
 			UpdateFramerate();
