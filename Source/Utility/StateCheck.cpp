@@ -32,6 +32,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "Interface/SaveState.h"
 #include "System/SystemInit.h"
 #include "Utility/Paths.h"
+#include "Utility/PerfLog.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -70,6 +71,10 @@ static void Finish()
 		gOut = nullptr;
 	}
 	printf( "StateCheck: finished %u frames\n", gFrame );
+
+	// The program exits right below without the normal shutdown, so write out
+	// the perf log first if this build has one (no-op otherwise).
+	DAEDALUS_PERF_CLOSE_GAME();
 
 #ifdef DAEDALUS_PSP
 	sceKernelExitGame();
