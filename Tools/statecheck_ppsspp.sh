@@ -70,10 +70,12 @@ for rom in "$@"; do
 		rc=$?
 		frames_a=$(grep -vc '^#' "$a")
 		frames_b=$(grep -vc '^#' "$b")
-		detail=$(grep -m1 -E '^(IDENTICAL|RAM differs)' "$OUT/$name/compare.txt")
+		detail=$(grep -m1 -E '^(IDENTICAL|RAM differs|INCONCLUSIVE)' "$OUT/$name/compare.txt")
 		if [ "$frames_a" != "$FRAMES" ] || [ "$frames_b" != "$FRAMES" ]; then
 			printf "%-40s %-8s %s\n" "$name" "ERROR" "incomplete run: $frames_a / $frames_b frames"
 			failed=1
+		elif [ $rc -eq 3 ]; then
+			printf "%-40s %-8s %s\n" "$name" "UNSURE" "$detail"
 		elif [ $rc -eq 0 ]; then
 			printf "%-40s %-8s %s\n" "$name" "PASS" "$detail"
 		else

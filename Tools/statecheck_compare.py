@@ -10,7 +10,8 @@ FCR31, HI, LO, a hash of N64 RAM, and all 32 integer registers.
 
 The script prints the first frame where the two runs differ and which values
 differ, plus a verdict. Exit code 0 means PASS (identical, or the final RAM
-and FPU state match), 1 means FAIL, 2 means a usage or file problem.
+and FPU state match), 1 means FAIL, 2 means a usage or file problem, 3 means
+INCONCLUSIVE (N64 RAM never changed, so the program never really ran).
 
 Note on timing: the interpreter and the dynarec may take an interrupt a few
 instructions apart, which can show up as a different PC or Count at a frame
@@ -63,6 +64,11 @@ def main():
         print("No frames to compare.")
         return 2
 
+    # If N64 RAM never changes during the whole run, the program most likely
+    # never started its real work (still booting, or stuck), so a match proves
+    # nothing. Report that instead of PASS.
+    ram_static = len(set(f[1]["rdram_hash"] for f in a[:n])) == 1 and len(set(f[1]["rdram_hash"] for f in b[:n])) == 1
+
     first_diff = None
     diff_frames = 0
     ram_reg_diff_frames = 0
@@ -80,6 +86,10 @@ def main():
                 first_diff = (i, diffs)
 
     last_same = a[n - 1][1] == b[n - 1][1]
+
+    if ram_static:
+        print("INCONCLUSIVE: N64 RAM never changed in either run (program did not get going). Try more frames.")
+        return 3
 
     if first_diff is None:
         print(f"IDENTICAL: all {n} frames match (PC, Count, registers, RAM).")
