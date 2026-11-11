@@ -180,3 +180,24 @@ Not done yet: block linking (step 2), wider idle loop detection (4), display
 list handler tuning (6), Media Engine audio by default (7, needs hardware),
 per game cycle scaling (8), and the April 2023 comparison (9, that source does
 not run in PPSSPP).
+
+## 9. Pokemon Stadium 2 (added to the benchmark set)
+
+Boots in PPSSPP and reaches the title screen in about 3000 frames. Same
+instrumented build, limiter off, audio off, no input:
+
+| | Pokemon Stadium 2 |
+|---|---|
+| Time per N64 frame | about 8 ms (cpu_other 4.1, dynarec 2.6, display list 0.7, vertex 0.1, compile 0.3) |
+| Share outside compiled code | 52% |
+| Whole cache flushes in 3000 frames | 26 from `osInvalICache` with a range of 16 KB or more, 3 from writes over compiled code |
+| Interpreter fallbacks | `MTC0` 61%, `COP0` function 18 (TLB) 29%, then `SWL`/`SWR` |
+
+This game is bound by recompiling, not by graphics or audio. The next candidate
+is a sound way to skip the full flush when the code memory has not changed
+(verify each fragment's source against memory first, and flush as today if any
+differs). Selective removal of single fragments is not safe: fragments are
+patched to jump directly into each other.
+
+The perf log header now records PSP model, reported clocks and a CPU speed test
+(see OVERCLOCK.md for running above 333 MHz).
