@@ -3,6 +3,7 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch: # lets you start a build by hand from the Actions tab
   repository_dispatch:
     types: [run_build]
 
@@ -23,26 +24,26 @@ jobs:
       run: |
         ./build_daedalus.sh PSP
 
-    - name: Get short SHA
-      id: slug
-      run: echo "{name}={sha8::$(echo ${GITHUB_S9A} | cut -c1-8)}" >> $GITHUB_OUTPUT
+    - name: Check that EBOOT.PBP was produced
+      run: |
+        test -f DaedalusX64/EBOOT.PBP || { echo "EBOOT.PBP missing"; exit 1; }
+        ls -la DaedalusX64 DaedalusX64/Plugins
 
     - name: Prepare Artifacts
       run: |
         rm -rf DaedalusX64/daedalus.prx # Remove the PRX used for testing in public builds
+        # Put the folder inside a staging dir so the downloaded zip contains
+        # a ready to copy "DaedalusX64" folder (EBOOT.PBP, Plugins, Roms, ...).
+        mkdir -p psp-artifact
+        cp -r DaedalusX64 psp-artifact/
+        echo "commit: ${GITHUB_SHA}" > psp-artifact/DaedalusX64/BUILD_INFO.txt
 
     - name: Upload artifacts
       if: ${{ success() }}
       uses: actions/upload-artifact@v4
       with:
         name: DaedalusX64-PSP
-        path: DaedalusX64
-
-    - name: Extract tag name
-      if: startsWith(github.ref, 'refs/tags/')
-      id: tag
-      run: echo "{name}={VERSION::${GITHUB_REF/refs\/tags\//}}" >> $GITHUB_OUTPUT
-
+        path: psp-artifact
 
   build-linux-amd64:
     runs-on: ubuntu-24.04
