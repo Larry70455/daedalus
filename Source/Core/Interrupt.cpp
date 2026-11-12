@@ -31,6 +31,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "R4300.h"
 
 #include "Debug/DBGConsole.h"
+#include "Utility/StateCheck.h"
 
 inline void SET_EXCEPTION(u32 mask, u32 exception)
 {
@@ -83,6 +84,7 @@ inline void R4300_JumpToInterruptVector(u32 exception_vector)
 
 	CPU_SetPC( exception_vector );
 	gCPUState.Delay = NO_DELAY;
+	DAEDALUS_STATE_CHECK_EXCEPTION();	// no-op unless DAEDALUS_STATE_CHECK
 }
 
 //*****************************************************************************

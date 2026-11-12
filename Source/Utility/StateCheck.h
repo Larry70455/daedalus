@@ -59,12 +59,15 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // the requested number of frames has been recorded.
 bool	StateCheck_Start();
 void	StateCheck_OnVerticalBlank();
+void	StateCheck_OnException();	// exclog=1: one line per exception taken
 
 #define DAEDALUS_STATE_CHECK_VBL()	StateCheck_OnVerticalBlank()
+#define DAEDALUS_STATE_CHECK_EXCEPTION()	StateCheck_OnException()
 
 #else
 
 #define DAEDALUS_STATE_CHECK_VBL()	do {} while( 0 )
+#define DAEDALUS_STATE_CHECK_EXCEPTION()	do {} while( 0 )
 
 #endif // DAEDALUS_STATE_CHECK
 

@@ -50,7 +50,9 @@ static u32		gFrame = 0;
 static int		gAudioOverride = -1;
 static int		gMemOptOverride = -1;
 static int		gPatchesOverride = -1;	// patches=0|1 overrides the OS function patches (HLE) ROM setting	// memopt=0|1 overrides the "memory access optimisation" ROM setting	// audio=0|1|2 in statecheck.txt (off, async, sync); -1 keeps the ROM setting
-static bool		gHashRam = true;	// ramhash=0 in statecheck.txt turns the RAM checksum off (for timing runs)
+static u32		gRamDumpFrame = ~0u;	// ramdump=N: write all of RDRAM to statecheck_ram.bin at vertical blank N
+static bool		gHashRam = true;
+static FILE *	gExcLog = nullptr;	// exclog=1: statecheck_exc.txt, one line per exception (vi, count, epc, cause, mi_intr)	// ramhash=0 in statecheck.txt turns the RAM checksum off (for timing runs)
 static u32		gLoadAt = 0;	// loadat=N: load the savestate through the in game path (CPU_RequestLoadState) at vertical blank N instead of before starting
 static std::string	gSaveStatePath;
 
@@ -75,6 +77,11 @@ static void Finish()
 		fprintf( gOut, "# done after %u vertical blanks\n", gFrame );
 		fclose( gOut );
 		gOut = nullptr;
+	}
+	if( gExcLog != nullptr )
+	{
+		fclose( gExcLog );
+		gExcLog = nullptr;
 	}
 	printf( "StateCheck: finished %u frames\n", gFrame );
 
@@ -118,6 +125,8 @@ bool StateCheck_Start()
 		else if( key == "memopt" )		gMemOptOverride = std::atoi( value.c_str() );
 		else if( key == "audio" )		gAudioOverride = std::atoi( value.c_str() );
 		else if( key == "loadat" )		gLoadAt = (u32)std::strtoul( value.c_str(), nullptr, 10 );
+		else if( key == "ramdump" )	gRamDumpFrame = (u32)std::strtoul( value.c_str(), nullptr, 10 );
+		else if( key == "exclog" )		{ if( value != "0" ) gExcLog = fopen( setBasePath( "statecheck_exc.txt" ).string().c_str(), "w" ); }
 		else if( key == "ramhash" )		gHashRam = ( value != "0" );
 	}
 
@@ -193,11 +202,24 @@ void StateCheck_OnVerticalBlank()
 	fprintf( gOut, " | vi_origin %08x\n", Memory_VI_GetRegister( VI_ORIGIN_REG ) );
 	fflush( gOut );	// keep the dump readable even if the run crashes or is killed
 
+	if( gFrame == gRamDumpFrame )
+	{
+		FILE * fp = fopen( setBasePath( "statecheck_ram.bin" ).string().c_str(), "wb" );
+		if( fp ) { fwrite( g_pu8RamBase, 1, gRamSize, fp ); fclose( fp ); }
+	}
 	gFrame++;
 	if( gLoadAt != 0 && gFrame == gLoadAt && !gSaveStatePath.empty() )
 		printf( "StateCheck: in game load of %s: %d\n", gSaveStatePath.c_str(), (int)CPU_RequestLoadState( setBasePath( gSaveStatePath ) ) );
 	if( gFrame >= gFramesWanted )
 		Finish();
+}
+
+void StateCheck_OnException()
+{
+	if( gExcLog == nullptr )
+		return;
+	fprintf( gExcLog, "%u %08x %08x %08x %08x\n", gFrame, gCPUState.CPUControl[C0_COUNT]._u32,
+			 gCPUState.CPUControl[C0_EPC]._u32, gCPUState.CPUControl[C0_CAUSE]._u32, Memory_MI_GetRegister( MI_INTR_REG ) );
 }
 
 #endif // DAEDALUS_STATE_CHECK
