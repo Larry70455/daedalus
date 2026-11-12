@@ -201,3 +201,32 @@ patched to jump directly into each other.
 
 The perf log header now records PSP model, reported clocks and a CPU speed test
 (see OVERCLOCK.md for running above 333 MHz).
+
+## 10. Pokemon Stadium 2 savestate and battle (PPSSPP, dynarec, Sync audio)
+
+- **Black screen after loading a savestate from the ROM browser: fixed.**
+  Loading before the game had ever run left emulator side state empty and
+  corrupted memory. The ROM browser now boots the game and applies the
+  savestate once 30 display lists have been drawn. The same savestate now
+  shows the WIN/LOSE screen, and pressing on through the menus reaches a
+  full battle.
+- **Branch delay slot exits were never compiled.** Recompiled code that exits
+  into a branch delay slot hands the rest of the function to the interpreter,
+  and only backwards branch targets became traces. One small function was
+  56% of all interpreted instructions in battle. Fix in `Core/Dynamo.cpp`
+  (switch `DAEDALUS_TRACE_AFTER_DELAY_SLOT_EXIT`).
+
+| Battle, per N64 frame | Before | After |
+|---|---|---|
+| Work (total minus audio wait), mean | 9.6 ms | 8.5 ms |
+| Work, 90th percentile | 15.8 ms | 13.7 ms |
+| Interpreted instructions | 6,065 | 1,604 |
+| Audio underruns in the run | 101 | 84 |
+
+Checked: Mario 64 and Smash Bros screenshots at frames 1500 and 2500 are
+pixel identical before and after; the battle renders correctly.
+
+Remaining in battle: audio processing 2.4 ms per frame in Sync mode (Media
+Engine audio needs a hardware test), `MTC0` and TLB probe fallbacks (60% and
+28% of the remaining fallbacks), and the striped trainer portraits next to
+the HP bars (a texture bug that was already there).

@@ -428,6 +428,23 @@ void CPU_UpdateTrace( u32 address, OpCode op_code, bool branch_delay_slot, bool 
 //*****************************************************************************
 //
 //*****************************************************************************
+// Recompiled code can exit in the middle of a branch: it leaves the branch
+// delay slot and the jump to the interpreter (this happens with "branch
+// likely" instructions). The interpreter then runs the delay slot and jumps.
+// Traces normally only start at the target of a backwards branch or right after
+// recompiled code, so when that jump goes forwards its target was never
+// compiled: the rest of the function ran in the interpreter every time.
+// In Pokemon Stadium 2 battles one such function was over half of all
+// interpreted instructions. With this switch on, the target of the branch that
+// finishes such an exit is treated like a backwards branch target (it becomes
+// a trace once it is hot). Set to 0 to get the old behaviour.
+#ifndef DAEDALUS_TRACE_AFTER_DELAY_SLOT_EXIT
+#define DAEDALUS_TRACE_AFTER_DELAY_SLOT_EXIT 1
+#endif
+#if DAEDALUS_TRACE_AFTER_DELAY_SLOT_EXIT
+static bool gExitedIntoDelaySlot = false;
+#endif
+
 void CPU_HandleDynaRecOnBranch( bool backwards, bool trace_already_enabled )
 {
 	#ifdef DAEDALUS_PROFILE
@@ -439,6 +456,14 @@ void CPU_HandleDynaRecOnBranch( bool backwards, bool trace_already_enabled )
 	{
 		start_of_trace = true;
 	}
+
+#if DAEDALUS_TRACE_AFTER_DELAY_SLOT_EXIT
+	if( gExitedIntoDelaySlot )
+	{
+		start_of_trace = true;
+		gExitedIntoDelaySlot = false;
+	}
+#endif
 
 	bool	change_core( false );
 	#ifdef DAEDALUS_LOG
@@ -481,6 +506,9 @@ void CPU_HandleDynaRecOnBranch( bool backwards, bool trace_already_enabled )
 			DYNAREC_PROFILE_ENTEREXIT( entry_address, gCPUState.CurrentPC, gCPUState.CPUControl[C0_COUNT]._u32 - entry_count );
 
 			start_of_trace = true;
+#if DAEDALUS_TRACE_AFTER_DELAY_SLOT_EXIT
+			gExitedIntoDelaySlot = ( gCPUState.Delay != NO_DELAY );
+#endif
 		}
 		else
 		{
@@ -592,6 +620,9 @@ void Dynamo_Reset()
 	gFragmentCache.Clear();
 	gResetFragmentCache = false;
 	gTraceRecorder.AbortTrace();
+#if DAEDALUS_TRACE_AFTER_DELAY_SLOT_EXIT
+	gExitedIntoDelaySlot = false;
+#endif
 #ifdef DAEDALUS_DEBUG_DYNAREC
 	gAbortedTraceReasons.clear();
 #endif
