@@ -444,6 +444,9 @@ void CPU_UpdateTrace( u32 address, OpCode op_code, bool branch_delay_slot, bool 
 #if DAEDALUS_TRACE_AFTER_DELAY_SLOT_EXIT
 static bool gExitedIntoDelaySlot = false;
 #endif
+#if DAEDALUS_TRACE_AFTER_EXCEPTION
+bool gTraceAfterException = false;
+#endif
 
 void CPU_HandleDynaRecOnBranch( bool backwards, bool trace_already_enabled )
 {
@@ -462,6 +465,13 @@ void CPU_HandleDynaRecOnBranch( bool backwards, bool trace_already_enabled )
 	{
 		start_of_trace = true;
 		gExitedIntoDelaySlot = false;
+	}
+#endif
+#if DAEDALUS_TRACE_AFTER_EXCEPTION
+	if( gTraceAfterException )
+	{
+		start_of_trace = true;
+		gTraceAfterException = false;
 	}
 #endif
 
@@ -622,6 +632,9 @@ void Dynamo_Reset()
 	gTraceRecorder.AbortTrace();
 #if DAEDALUS_TRACE_AFTER_DELAY_SLOT_EXIT
 	gExitedIntoDelaySlot = false;
+#endif
+#if DAEDALUS_TRACE_AFTER_EXCEPTION
+	gTraceAfterException = false;
 #endif
 #ifdef DAEDALUS_DEBUG_DYNAREC
 	gAbortedTraceReasons.clear();

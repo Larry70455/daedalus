@@ -84,6 +84,9 @@ inline void R4300_JumpToInterruptVector(u32 exception_vector)
 
 	CPU_SetPC( exception_vector );
 	gCPUState.Delay = NO_DELAY;
+#if DAEDALUS_TRACE_AFTER_EXCEPTION
+	gTraceAfterException = true;	// the handler the vector jumps to may become a trace
+#endif
 	DAEDALUS_STATE_CHECK_EXCEPTION();	// no-op unless DAEDALUS_STATE_CHECK
 }
 

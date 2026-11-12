@@ -200,6 +200,21 @@ inline void CPU_TakeBranch( u32 new_pc ) { gCPUState.TargetPC = new_pc; gCPUStat
 
 #define COUNTER_INCREMENT_PER_OP			1
 
+// An exception or interrupt sends the CPU to the exception vector, which then
+// jumps (forwards) into the game's handler. Traces normally only start at the
+// target of a backwards branch or right after recompiled code, so the handler
+// was never recompiled. With this switch on, the first branch target after
+// an exception is treated like a backwards branch target (it becomes a trace
+// once it is hot). This cut interpreted instructions per frame by 39% in
+// Super Smash Bros., 64% in SM64 and 60% in Pokemon Stadium 2.
+// Set to 0 to get the old behaviour.
+#ifndef DAEDALUS_TRACE_AFTER_EXCEPTION
+#define DAEDALUS_TRACE_AFTER_EXCEPTION 1
+#endif
+#if DAEDALUS_TRACE_AFTER_EXCEPTION
+extern bool gTraceAfterException;	// set when the exception vector is entered (Interrupt.cpp), read in Dynamo.cpp
+#endif
+
 extern u8 *		gLastAddress;
 
 // Take advantage of the cooperative multitasking
