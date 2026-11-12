@@ -25,7 +25,18 @@ TEST_DISABLE_CACHE_FUNCS
 		PerfLog::gStats[ PerfLog::kStatStaleOps ] += PerfLog::CountStaleCompiledOps();
 	}
 #endif
+#ifndef DAEDALUS_ICACHE_RANGE_INVALIDATE
+#define DAEDALUS_ICACHE_RANGE_INVALIDATE 1
+#endif
+#if DAEDALUS_ICACHE_RANGE_INVALIDATE
 	CPU_InvalidateICacheRange(p, len);
+#else
+	// Old behaviour: 16 KB or more drops all compiled code
+	if( len < 0x4000 )
+		CPU_InvalidateICacheRange(p, len);
+	else
+		CPU_InvalidateICache();
+#endif
 #endif
 
 	return PATCH_RET_JR_RA;
