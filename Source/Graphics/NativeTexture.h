@@ -49,6 +49,15 @@ class CNativeTexture
 	public:
 		static	std::shared_ptr<CNativeTexture>		Create( u32 width, u32 height, ETextureFormat texture_format );
 		static	std::shared_ptr<CNativeTexture>		CreateFromPng( const std::filesystem::path p_filename, ETextureFormat texture_format );
+#ifdef DAEDALUS_PSP
+		// A texture the PSP GPU can draw into (8888, not swizzled, in video
+		// memory, 8 KB aligned). It holds an n64_width x n64_height N64 image
+		// drawn at "scale" PSP pixels per N64 pixel; texture coordinates are
+		// still in N64 texels. Returns nullptr if there is no video memory.
+		static	std::shared_ptr<CNativeTexture>		CreateRenderTarget( u32 n64_width, u32 n64_height, u32 scale );
+		inline void *					GetRenderTargetPointer() const	{ return mpData; }
+		inline u32						GetRenderTargetStride() const	{ return mCorrectedWidth; }
+#endif
 
 		void							InstallTexture() const;
 
@@ -99,6 +108,7 @@ class CNativeTexture
 		bool				mIsDataVidMem;
 		bool				mIsPaletteVidMem;
 		bool				mIsSwizzled;
+		void *				mpDataAllocation;	// what to free; differs from mpData for render targets (alignment)
 #ifdef DAEDALUS_ENABLE_ASSERTS
 		bool				mPaletteSet;
 #endif

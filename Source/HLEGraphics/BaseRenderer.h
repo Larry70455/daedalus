@@ -304,11 +304,20 @@ public:
 
 	// Texture stuff
 	virtual void		Draw2DTexture(f32 x0, f32 y0, f32 x1, f32 y1, f32 u0, f32 v0, f32 u1, f32 v1, const std::shared_ptr<CNativeTexture> texture) = 0;
+
+	// Render to texture (only the PSP renderer implements these).
+	// The game picked a new colour image (SetCImg) to draw into.
+	virtual void		SetColorImage( u32 address [[maybe_unused]], u32 width [[maybe_unused]], u32 format [[maybe_unused]], u32 size [[maybe_unused]] ) {}
+	// The display list ended: stop drawing into an offscreen image.
+	virtual void		EndRenderTarget() {}
+	// If ti reads an image the game drew offscreen this frame, the texture holding it.
+	virtual std::shared_ptr<CNativeTexture>	LookupRenderTarget( const TextureInfo & ti [[maybe_unused]] ) { return nullptr; }
 	virtual void		Draw2DTextureR(f32 x0, f32 y0, f32 x1, f32 y1, f32 x2, f32 y2, f32 x3, f32 y3, f32 s, f32 t, const std::shared_ptr <CNativeTexture> texture) = 0;
 
 	// Viewport stuff
 	void				SetN64Viewport( const glm::vec2 & scale, const glm::vec2 & trans );
 	void				SetScissor( u32 x0, u32 y0, u32 x1, u32 y1 );
+	u32					mScissor[ 4 ] = { 0, 0, 320, 240 };	// last SetScissor arguments
 
 #ifdef DAEDALUS_DEBUG_DISPLAYLIST
 	void				PrintActive();
@@ -421,9 +430,10 @@ protected:
 	glm::vec3					LightVert( const glm::vec3 & norm ) const;
 	glm::vec3					LightPointVert( const glm::vec4 & w ) const;
 
+protected:
+	void				UpdateViewport();	// protected: the PSP renderer redraws the viewport for render targets
 private:
 	void				InitViewport();
-	void				UpdateViewport();
 
 	inline void			UpdateWorldProject();
 

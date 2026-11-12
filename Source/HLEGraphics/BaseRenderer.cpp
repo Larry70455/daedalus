@@ -1701,7 +1701,9 @@ void BaseRenderer::UpdateTileSnapshot( u32 index, u32 tile_idx )
 		}
 		else
 		{
-			std::shared_ptr<CNativeTexture> texture = CTextureCache::Get()->GetOrCreateTexture( ti );
+			std::shared_ptr<CNativeTexture> texture = LookupRenderTarget( ti );	// an image drawn offscreen by the game (PSP only)
+			if( texture == nullptr )
+				texture = CTextureCache::Get()->GetOrCreateTexture( ti );
 
 			if( texture != NULL && texture != mBoundTexture[ index ] )
 			{
@@ -1889,6 +1891,8 @@ std::shared_ptr<CNativeTexture> BaseRenderer::LoadTextureDirectly( const Texture
 //*****************************************************************************
 void BaseRenderer::SetScissor( u32 x0, u32 y0, u32 x1, u32 y1 )
 {
+	mScissor[ 0 ] = x0; mScissor[ 1 ] = y0; mScissor[ 2 ] = x1; mScissor[ 3 ] = y1;
+
 	//Clamp scissor to max N64 screen resolution //Corn
 	x1 = std::min(x1, uViWidth);
 	y1 = std::min(y1, uViHeight);

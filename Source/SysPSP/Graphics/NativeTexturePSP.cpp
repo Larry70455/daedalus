@@ -266,6 +266,38 @@ std::shared_ptr<CNativeTexture>	CNativeTexture::Create( u32 width, u32 height, E
 }
 
 //*****************************************************************************
+// See NativeTexture.h
+//*****************************************************************************
+std::shared_ptr<CNativeTexture>	CNativeTexture::CreateRenderTarget( u32 n64_width, u32 n64_height, u32 scale )
+{
+	// Construct without data, then set up the real size by hand
+	std::shared_ptr<CNativeTexture> t = std::make_shared<CNativeTexture>( 0, 0, TexFmt_8888 );
+
+	t->mWidth			= n64_width * scale;
+	t->mHeight			= n64_height * scale;
+	t->mCorrectedWidth	= std::max< u32 >( CorrectDimension( t->mWidth ), 64 );	// the GPU needs a draw buffer width that is a multiple of 64
+	t->mCorrectedHeight	= CorrectDimension( t->mHeight );
+	t->mTextureBlockWidth = t->mCorrectedWidth;
+	t->mIsSwizzled		= false;
+	// Texture coordinates arrive in N64 texels: one N64 texel is "scale" pixels here
+	t->mScale.x			= (f32)scale / t->mCorrectedWidth;
+	t->mScale.y			= (f32)scale / t->mCorrectedHeight;
+
+	const u32 kAlign = 8192;	// draw buffers must be 8 KB aligned
+	u32 bytes = t->mCorrectedWidth * t->mCorrectedHeight * 4 + kAlign;
+	void * p = nullptr;
+	bool is_vid_mem = false;
+	if( !CVideoMemoryManager::Get()->Alloc( bytes, &p, &is_vid_mem ) )
+		return nullptr;
+	t->mpDataAllocation = p;
+	if( !is_vid_mem )
+		return nullptr;	// the GPU can only draw into video memory (the destructor frees p)
+	t->mpData = (void *)( ( (u32)p + kAlign - 1 ) & ~( kAlign - 1 ) );
+	t->mIsDataVidMem = true;
+	return t;
+}
+
+//*****************************************************************************
 //
 //*****************************************************************************
 CNativeTexture::CNativeTexture( u32 w, u32 h, ETextureFormat texture_format )
@@ -278,6 +310,7 @@ CNativeTexture::CNativeTexture( u32 w, u32 h, ETextureFormat texture_format )
 ,	mpPalette( nullptr )
 ,	mIsPaletteVidMem( false )
 ,	mIsSwizzled( true )
+,	mpDataAllocation( nullptr )
 #ifdef DAEDALUS_ENABLE_ASSERTS
 ,	mPaletteSet( false )
 #endif
@@ -287,7 +320,12 @@ CNativeTexture::CNativeTexture( u32 w, u32 h, ETextureFormat texture_format )
 
 	u32		bytes_required( GetBytesRequired() );
 
-	if( !CVideoMemoryManager::Get()->Alloc( bytes_required, &mpData, &mIsDataVidMem ) )
+	if( w == 0 || h == 0 )
+	{
+		mpData = nullptr;	// render target: CreateRenderTarget allocates
+		mIsDataVidMem = false;
+	}
+	else if( !CVideoMemoryManager::Get()->Alloc( bytes_required, &mpData, &mIsDataVidMem ) )
 	{
 			#ifdef DAEDALUS_DEBUG_CONSOLE
 		DAEDALUS_ERROR( "Out of memory for texels ( %d bytes)", bytes_required );
@@ -325,7 +363,7 @@ CNativeTexture::CNativeTexture( u32 w, u32 h, ETextureFormat texture_format )
 //*****************************************************************************
 CNativeTexture::~CNativeTexture()
 {
-	CVideoMemoryManager::Get()->Free( mpData );
+	CVideoMemoryManager::Get()->Free( mpDataAllocation != nullptr ? mpDataAllocation : mpData );
 	CVideoMemoryManager::Get()->Free( mpPalette );
 }
 

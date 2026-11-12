@@ -128,6 +128,10 @@ public:
 	void				DumpScreenShot();
 	void				DumpNextScreen()			{ mDumpNextScreen = 2; }
 
+	// The colour buffer the display list being built now will draw into
+	// when the GPU runs it (see PSP_RestoreMainDrawBuffer)
+	void *				GetDrawBufferForCurrentList() const;
+
 private:
 	void				SaveScreenshot( const std::filesystem::path filename, s32 x, s32 y, u32 width, u32 height );
 
@@ -373,6 +377,32 @@ void IGraphicsContext::UpdateFrame( bool wait_for_vbl )
 	// Hack to semi-fix XG2, it uses setprimdepth for background and also does not clear zbuffer //Corn
 	//
 	if( g_ROM.GameHacks == EXTREME_G2 ) sceGuClear(GU_DEPTH_BUFFER_BIT | GU_FAST_CLEAR_BIT);	//Clear Zbuffer
+}
+
+//*****************************************************************************
+// With "double display" the display list built during frame N is run by the
+// GPU after the buffer swap at the end of frame N, so it draws into the buffer
+// that is NOT the current back buffer. Otherwise it draws into the current one.
+//*****************************************************************************
+void * IGraphicsContext::GetDrawBufferForCurrentList() const
+{
+	if( PSP_TV_LACED )
+		return mpBuffers[ 0 ];
+	if( gDoubleDisplayEnabled )
+		return ( mpCurrentBackBuffer == mpBuffers[ 0 ] ) ? mpBuffers[ 1 ] : mpBuffers[ 0 ];
+	return mpCurrentBackBuffer;
+}
+
+// Used by the renderer after drawing into an offscreen texture
+bool PSP_CanRenderToTexture()
+{
+	return !PSP_TV_LACED && !gGlobalPreferences.TVEnable;
+}
+
+void PSP_RestoreMainDrawBuffer()
+{
+	IGraphicsContext * context = static_cast< IGraphicsContext * >( CGraphicsContext::Get().get() );
+	sceGuDrawBufferList( SCR_MODE, context->GetDrawBufferForCurrentList(), BUF_WIDTH );
 }
 
 //*****************************************************************************

@@ -6,6 +6,7 @@
 #include "Combiner/BlendConstant.h"
 #include "Combiner/CombinerTree.h"
 #include "Combiner/RenderSettings.h"
+#include "Core/Memory.h"
 #include "Core/ROM.h"
 #include "Debug/Dump.h"
 #include "Graphics/GraphicsContext.h"
@@ -151,6 +152,8 @@ u32 alignas(DATA_ALIGN) gSelectedTexture[kPlaceholderSize];
 
 RendererPSP::RendererPSP()
 {
+	CreateRenderTargets();
+
 	//
 	//	Set up RGB = T0, A = T0
 	//
@@ -1244,4 +1247,132 @@ void DestroyRenderer()
 	delete gRendererPSP;
 	gRendererPSP = nullptr;
 	gRenderer    = nullptr;
+}
+
+
+//*****************************************************************************
+// Render to texture
+//
+// Some games draw a small picture into an offscreen colour image and then use
+// that image as a texture. Pokemon Stadium 2 draws the 32x32 Pokemon pictures
+// next to the HP bars this way, once when the battle starts, and shows them
+// for the whole battle. Without this the PSP drew those pictures onto the
+// screen (hidden under the scene) and the texture showed whatever old data was
+// in N64 memory: coloured noise.
+//
+// Now a small colour image (16 bit RGBA, 8 to 64 pixels wide) makes the GPU
+// draw into a texture in video memory instead, at 2 PSP pixels per N64 pixel.
+// A later texture loaded from that address uses this texture, for as long as
+// the N64 memory there stays the same as when the picture was drawn (if the
+// game writes something else there, the normal texture path takes over).
+// The pixels are not written back to N64 memory.
+//*****************************************************************************
+extern bool PSP_CanRenderToTexture();
+extern void PSP_RestoreMainDrawBuffer();
+extern u32 uViWidth;
+extern u32 gRDPFrame;
+
+static const u32 kMaxRenderTargetWidth = 64;
+static const u32 kRenderTargetScale = 2;
+
+static u32 HashN64Image( u32 address, u32 width )
+{
+	// The picture is at most width x width pixels of 16 bits
+	u32 bytes = width * width * 2;
+	if( address + bytes > gRamSize )
+		return 0;
+	const u32 * p = reinterpret_cast< const u32 * >( g_pu8RamBase + address );
+	u32 h = 2166136261u;
+	for( u32 i = 0; i < bytes / 4; ++i )
+		h = ( h ^ p[ i ] ) * 16777619u;
+	return h;
+}
+
+void RendererPSP::CreateRenderTargets()
+{
+	// Reserved once, before textures fill video memory
+	for( u32 i = 0; i < kNumRenderTargets; ++i )
+		mRenderTargets[ i ].Texture = CNativeTexture::CreateRenderTarget( kMaxRenderTargetWidth, kMaxRenderTargetWidth, kRenderTargetScale );
+}
+
+void RendererPSP::SetColorImage( u32 address, u32 width, u32 format, u32 size )
+{
+	EndRenderTarget();
+
+	if( format != G_IM_FMT_RGBA || size != G_IM_SIZ_16b || width > kMaxRenderTargetWidth ||
+		width >= uViWidth || width < 8 || !PSP_CanRenderToTexture() )
+		return;
+
+	// The slot already used for this address, or the least recently drawn one
+	SRenderTarget * target = nullptr;
+	SRenderTarget * oldest = nullptr;
+	for( u32 i = 0; i < kNumRenderTargets; ++i )
+	{
+		SRenderTarget & t = mRenderTargets[ i ];
+		if( t.Texture == nullptr )
+			continue;
+		if( t.Address == address )
+		{
+			target = &t;
+			break;
+		}
+		if( oldest == nullptr || t.LastFrame < oldest->LastFrame )
+			oldest = &t;
+	}
+	if( target == nullptr )
+		target = oldest;
+	if( target == nullptr )
+		return;	// no video memory for render targets
+
+	target->Address = address;
+	target->Width = width;
+	target->LastFrame = gRDPFrame;
+	target->Valid = false;	// until EndRenderTarget
+	mActiveRenderTarget = target;
+
+	// Draw into the texture: N64 pixel (x, y) goes to (2x, 2y)
+	sceGuDrawBufferList( GU_PSM_8888, (void *)( (u32)target->Texture->GetRenderTargetPointer() & 0x00ffffff ), target->Texture->GetRenderTargetStride() );
+	mSavedN64ToScreenScale = mN64ToScreenScale;
+	mSavedN64ToScreenTranslate = mN64ToScreenTranslate;
+	mN64ToScreenScale = glm::vec2( (f32)kRenderTargetScale, (f32)kRenderTargetScale );
+	mN64ToScreenTranslate = glm::vec2( 0.0f, 0.0f );
+	UpdateViewport();
+	sceGuScissor( 0, 0, width * kRenderTargetScale, width * kRenderTargetScale );
+}
+
+void RendererPSP::EndRenderTarget()
+{
+	if( mActiveRenderTarget == nullptr )
+		return;
+	SRenderTarget * target = mActiveRenderTarget;
+	mActiveRenderTarget = nullptr;
+
+	target->RamHash = HashN64Image( target->Address, target->Width );
+	target->Valid = true;
+
+	PSP_RestoreMainDrawBuffer();
+	mN64ToScreenScale = mSavedN64ToScreenScale;
+	mN64ToScreenTranslate = mSavedN64ToScreenTranslate;
+	UpdateViewport();
+	SetScissor( mScissor[ 0 ], mScissor[ 1 ], mScissor[ 2 ], mScissor[ 3 ] );
+}
+
+std::shared_ptr<CNativeTexture> RendererPSP::LookupRenderTarget( const TextureInfo & ti )
+{
+	if( ti.GetFormat() != G_IM_FMT_RGBA || ti.GetSize() != G_IM_SIZ_16b )
+		return nullptr;
+	const u32 address = ti.GetLoadAddress();
+	for( u32 i = 0; i < kNumRenderTargets; ++i )
+	{
+		SRenderTarget & t = mRenderTargets[ i ];
+		if( !t.Valid || t.Address != address || ti.GetWidth() > t.Width )
+			continue;
+		if( HashN64Image( t.Address, t.Width ) != t.RamHash )
+		{
+			t.Valid = false;	// the game wrote something else there
+			return nullptr;
+		}
+		return t.Texture;
+	}
+	return nullptr;
 }

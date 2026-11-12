@@ -54,6 +54,11 @@ public:
 
 	SBlendStateEntry	LookupBlendState( u64 mux, bool two_cycles );
 
+	// Render to texture, see RendererPSP.cpp
+	virtual void		SetColorImage( u32 address, u32 width, u32 format, u32 size );
+	virtual void		EndRenderTarget();
+	virtual std::shared_ptr<CNativeTexture>	LookupRenderTarget( const TextureInfo & ti );
+
 private:
 	// For handling large textures.
 	void				Draw2DTextureBlit(f32 x0, f32 y0, f32 x1, f32 y1, f32 u0, f32 v0, f32 u1, f32 v1, const std::shared_ptr<CNativeTexture> texture);
@@ -63,6 +68,22 @@ private:
 	void				RenderUsingRenderSettings( const CBlendStates * states, DaedalusVtx * p_vertices, u32 num_vertices, u32 triangle_mode, u32 render_flags );
 
 private:
+	struct SRenderTarget
+	{
+		u32									Address = 0;
+		u32									Width = 0;		// in N64 pixels
+		u32									LastFrame = 0;	// gRDPFrame when last drawn
+		u32									RamHash = 0;	// N64 memory at Address when it was drawn
+		bool								Valid = false;
+		std::shared_ptr<CNativeTexture>		Texture;
+	};
+	static const u32	kNumRenderTargets = 4;
+	SRenderTarget		mRenderTargets[ kNumRenderTargets ];
+	SRenderTarget *		mActiveRenderTarget = nullptr;
+	void				CreateRenderTargets();
+	glm::vec2			mSavedN64ToScreenScale;
+	glm::vec2			mSavedN64ToScreenTranslate;
+
 	// Temporary vertex storage
 	DaedalusVtx			mVtx_Save[320];
 
