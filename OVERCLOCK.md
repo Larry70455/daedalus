@@ -13,7 +13,19 @@ varies (the author reports some units pass 407 MHz, some sit near it, some stay
 below), and an unstable setting crashes the console until it is rebooted.
 Use it at your own risk. I have not tested it on a PSP.
 
-## Recommended way: use that project's plugin or picker, not Daedalus code
+## Built in: Settings, CPU Clock
+
+Global settings now has a **CPU Clock** option: 333 MHz (normal) or 400 MHz.
+It loads `Plugins/overclock.prx`, a small kernel module using the PLL method
+of psp-beyond-444mhz (overclock-picker, denominator 0x12). It steps the clock
+up about 4 MHz at a time with a pause after each step, so switching takes
+about 2 seconds. The real target is 398.8 MHz, the nearest step to 400. The
+setting is applied when a game starts and when it is changed, and the clock is
+put back to 333 MHz when you quit with HOME. Not tested on real hardware yet.
+If the console freezes, hold the power switch to turn it off, then turn the
+setting back to 333 MHz. Do not combine it with the external plugin below.
+
+## Other way: that project's plugin or picker
 
 The plugin changes the PLL registers itself and does not hook the power
 functions, so Daedalus's normal start-up clock request does not undo it.

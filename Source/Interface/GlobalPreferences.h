@@ -61,6 +61,7 @@ struct SGlobalPreferences
 	bool						CustomBlendModes;
 #endif
 	bool						BatteryWarning;
+	bool						Overclock400;		// PSP: run the CPU at about 400 MHz (unofficial, see OverclockPSP.h)
 	bool						LargeROMBuffer;
 	bool						ForceLinearFilter;
 	bool						RumblePak;

@@ -42,6 +42,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "Utility/Translate.h"
 
 #include "Input/InputManager.h"
+#ifdef DAEDALUS_PSP
+#include "SysPSP/Utility/OverclockPSP.h"
+#endif
 
 
 extern u32 HAVE_DVE;
@@ -51,6 +54,39 @@ extern bool PSP_IS_SLIM;
 
 namespace
 {
+
+#ifdef DAEDALUS_PSP
+	// "CPU 400 MHz": switches the overclock on or off straight away
+	class COverclockSetting : public CUISetting
+	{
+	public:
+		COverclockSetting( const char * name, const char * description )
+			:	CUISetting( name, description )
+		{
+		}
+
+		virtual	void		OnNext()		{ Toggle(); }
+		virtual	void		OnPrevious()	{ Toggle(); }
+
+		virtual const char *	GetSettingName() const
+		{
+			if( mFailed )
+				return "Plugin missing";
+			return gGlobalPreferences.Overclock400 ? "400 MHz" : "333 MHz";
+		}
+
+	private:
+		void Toggle()
+		{
+			gGlobalPreferences.Overclock400 = !gGlobalPreferences.Overclock400;
+			mFailed = PSP_ApplyOverclockPreference() < 0;
+			if( mFailed )
+				gGlobalPreferences.Overclock400 = false;
+		}
+
+		bool	mFailed = false;
+	};
+#endif
 
 	class CViewPortSetting : public CUISetting
 	{
@@ -321,6 +357,9 @@ IGlobalSettingsComponent::IGlobalSettingsComponent( CUIContext * p_context )
 #ifdef DAEDALUS_DEBUG_DISPLAYLIST
 	mElements.Add(std::make_unique<CBoolSetting>( &gGlobalPreferences.HighlightInexactBlendModes, "Highlight Inexact Blend Modes",	"Replace inexact blend modes with a placeholder texture.", "Yes", "No" ) );
 	mElements.Add(std::make_unique<CBoolSetting>( &gGlobalPreferences.CustomBlendModes, "Use Custom Blend Modes",	"Debugging tool to disable custom blendmodes.", "Yes", "No" ) );
+#endif
+#if DAEDALUS_PSP
+	mElements.Add(std::make_unique<COverclockSetting>( "CPU Clock", "400 MHz is an unofficial overclock (psp-beyond-444mhz method). Faster, but a console that is not stable at that speed freezes and must be restarted with the power switch. Takes about 2 seconds to change." ) );
 #endif
 	mElements.Add(std::make_unique<CBoolSetting>( &gGlobalPreferences.BatteryWarning, "Low Battery Warning",	"Whether to allow Daedalus to notify when the battery is low.", "Yes", "No" ) );
 	mElements.Add(std::make_unique<CColorSetting>( "GUI Color", "Change GUI Color" ) );

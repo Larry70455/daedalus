@@ -51,6 +51,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "RomFile/RomFile.h"
 #include "Utility/Stream.h"
 #include "Debug/Synchroniser.h"
+#ifdef DAEDALUS_PSP
+#include "SysPSP/Utility/OverclockPSP.h"
+#endif
 
 #if defined(DAEDALUS_ENABLE_DYNAREC_PROFILE)
 // This isn't really the most appropriate place. Need to check with
@@ -525,6 +528,11 @@ bool ROM_LoadFile(const RomID & rom_id, const RomSettings & settings, const SRom
 
 	// Read and apply preferences from preferences.ini
 	preferences.Apply();
+
+#ifdef DAEDALUS_PSP
+	// "CPU 400 MHz" setting (no-op when it is off and the clock is normal)
+	PSP_ApplyOverclockPreference();
+#endif
 
 	// Parse cheat file this rom, if cheat feature is enabled
 	// This is also done when accessing the cheat menu

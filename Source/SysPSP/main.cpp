@@ -104,6 +104,8 @@ int  gPspModel = -1;		// kuKernelGetModel(): 0 PSP-1000, 1 2000, 2 and 3 3000, 4
 
 PSP_HEAP_SIZE_KB(-256);
 
+#include "SysPSP/Utility/OverclockPSP.h"
+
 // HOME button support.
 // Older PSP SDKs set up a default exit callback for every program. Current
 // SDKs do not, so without this the HOME button does nothing in the emulator.
@@ -111,6 +113,7 @@ PSP_HEAP_SIZE_KB(-256);
 // quit (HOME, then "Exit Game"), it calls sceKernelExitGame().
 static int ExitCallback( int arg1 [[maybe_unused]], int arg2 [[maybe_unused]], void * common [[maybe_unused]] )
 {
+	PSP_RestoreNormalClock();	// leave the console at 333 MHz if the 400 MHz setting was on
 	sceKernelExitGame();
 	return 0;
 }

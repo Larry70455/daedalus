@@ -173,6 +173,7 @@ bool IPreferences::OpenPreferencesFile( const std::filesystem::path  &filename )
 		BOOL_SETTING( gGlobalPreferences, CustomBlendModes, defaults );
 #endif
 		BOOL_SETTING( gGlobalPreferences, BatteryWarning, defaults );
+		BOOL_SETTING( gGlobalPreferences, Overclock400, defaults );
 		BOOL_SETTING( gGlobalPreferences, LargeROMBuffer, defaults );
 		FLOAT_SETTING( gGlobalPreferences, StickMinDeadzone, defaults );
 		FLOAT_SETTING( gGlobalPreferences, StickMaxDeadzone, defaults );
@@ -359,6 +360,7 @@ void IPreferences::Commit()
 		OUTPUT_BOOL( gGlobalPreferences, CustomBlendModes, defaults );
 #endif
 		OUTPUT_BOOL( gGlobalPreferences, BatteryWarning, defaults );
+		OUTPUT_BOOL( gGlobalPreferences, Overclock400, defaults );
 		OUTPUT_BOOL( gGlobalPreferences, LargeROMBuffer, defaults );
 		OUTPUT_INT( gGlobalPreferences, GuiColor, defaults );
 		OUTPUT_FLOAT( gGlobalPreferences, StickMinDeadzone, defaults );
@@ -419,6 +421,7 @@ SGlobalPreferences::SGlobalPreferences()
 ,	CustomBlendModes( true )
 #endif
 ,	BatteryWarning( false )
+,	Overclock400( false )
 ,	LargeROMBuffer( true )
 ,	ForceLinearFilter( false )
 ,	RumblePak ( false )
