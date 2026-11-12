@@ -43,6 +43,7 @@ class CCodeGeneratorPSP : public CCodeGenerator, public CAssemblyWriterPSP
 		virtual void				Finalise( ExceptionHandlerFn p_exception_handler_fn, const std::vector< CJumpLocation > & exception_handler_jumps, const std::vector< RegisterSnapshotHandle>& exception_handler_snapshots );
 
 		virtual void				UpdateRegisterCaching( u32 instruction_idx );
+		virtual void				SetInstructionsExecuted( u32 count )	{ mInstructionsExecuted = count; }
 
 		virtual RegisterSnapshotHandle	GetRegisterSnapshot();
 
@@ -270,6 +271,7 @@ private:
 
 
 				void				GenerateGenericR4300( OpCode op_code, CPU_Instruction p_instruction );
+				void				GenerateCountAdjust( bool forward, EPspReg t0, EPspReg t1 );
 				using ReadMemoryFunction = u32 (*)(u32 address, u32 current_pc );
 				using WriteMemoryFunction = void (*)( u32 address, u32 value, u32 current_pc );
 
@@ -307,6 +309,7 @@ private:
 				u32					mEntryAddress;
 				CCodeLabel			mLoopTop;
 				bool				mUseFixedRegisterAllocation;
+				u32					mInstructionsExecuted;	// see SetInstructionsExecuted
 
 				std::vector< CN64RegisterCachePSP >	mRegisterSnapshots;
 				CN64RegisterCachePSP	mRegisterCache;

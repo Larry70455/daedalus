@@ -54,6 +54,11 @@ class CCodeGenerator
 
 		virtual void				UpdateRegisterCaching( u32 instruction_idx ) = 0;
 
+		// How many instructions of the trace have run before the one about to
+		// be generated (the same count the exit code adds to COUNT). Only used
+		// by generators that make reads of COUNT exact; ignored by default.
+		virtual void				SetInstructionsExecuted( u32 count ) { (void)count; }
+
 		virtual RegisterSnapshotHandle	GetRegisterSnapshot() = 0;
 
 		virtual CCodeLabel			GetEntryPoint() const = 0;

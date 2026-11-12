@@ -621,6 +621,7 @@ void CFragment::Assemble( std::shared_ptr<CCodeBufferManager> p_manager,
 #endif
 
 		p_generator->UpdateRegisterCaching( i );
+		p_generator->SetInstructionsExecuted( i );
 
 		// Check the cop1 usable flag. Do this only once (theoretically it could be toggled mid-fragment but this is unlikely)
 		/*
@@ -766,6 +767,7 @@ void CFragment::Assemble( std::shared_ptr<CCodeBufferManager> p_manager,
 				//exception_handler_jumps.push_back( handler );
 			}
 			*/
+			p_generator->SetInstructionsExecuted( num_instructions_executed );
  //PSP, We handle exceptions directly with _ReturnFromDynaRecIfStuffToDo
 #ifdef DAEDALUS_PSP
 			p_generator->GenerateOpCode( ti, true, nullptr, nullptr);

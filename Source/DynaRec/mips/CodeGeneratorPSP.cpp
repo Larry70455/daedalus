@@ -66,6 +66,24 @@ using namespace AssemblyUtils;
 //Define to enable exceptions for interpreter calls from DYNAREC
 //#define ALLOW_INTERPRETER_EXCEPTIONS
 
+// Keep COUNT exact inside fragments. COUNT and the event countdown are
+// normally only updated when a fragment exits, so in the middle of a fragment
+// they are behind by the instructions already run. With this switch on:
+//  - MFC0 of COUNT adds those instructions (GenerateMFC0),
+//  - calls out to C that may look at COUNT or leave the fragment (slow memory
+//    accesses, COP0 instructions run by the interpreter) see COUNT and the
+//    event countdown moved forward by those instructions, and moved back when
+//    the call returns (GenerateCountAdjust),
+//  - when such a call leaves the fragment (an interrupt or exception), the
+//    instruction itself is counted too (HandleException_extern), as the
+//    interpreter does.
+// Before, those instructions were simply lost when a fragment was left in
+// the middle, so the timing of later interrupts depended on where fragments
+// happened to start. Set to 0 to get the old behaviour.
+#ifndef DAEDALUS_EXACT_COUNT_READ
+#define DAEDALUS_EXACT_COUNT_READ 1
+#endif
+
 
 
 #define NOT_IMPLEMENTED( x )	DAEDALUS_ERROR( x )
@@ -221,6 +239,12 @@ extern "C"
 {
 void HandleException_extern()
 {
+#if DAEDALUS_EXACT_COUNT_READ
+	// The generated code already added the instructions before this one
+	// (GenerateCountAdjust); count this one as the interpreter would.
+	gCPUState.CPUControl[C0_COUNT]._u32 += COUNTER_INCREMENT_PER_OP;
+	gCPUState.Events[ 0 ].mCount -= COUNTER_INCREMENT_PER_OP;
+#endif
 	switch (gCPUState.Delay)
 	{
 		case DO_DELAY:
@@ -289,6 +313,7 @@ CCodeGeneratorPSP::CCodeGeneratorPSP( CAssemblyBuffer * p_buffer_a, CAssemblyBuf
 ,	mEntryAddress( 0 )
 ,	mLoopTop( nullptr )
 ,	mUseFixedRegisterAllocation( false )
+,	mInstructionsExecuted( 0 )
 {
 }
 
@@ -298,6 +323,7 @@ CCodeGeneratorPSP::CCodeGeneratorPSP( CAssemblyBuffer * p_buffer_a, CAssemblyBuf
 void	CCodeGeneratorPSP::Initialise( u32 entry_address, u32 exit_address, u32 * hit_counter, const void * p_base, const SRegisterUsageInfo & register_usage )
 {
 	mEntryAddress = entry_address;
+	mInstructionsExecuted = 0;
 
 	mpBasePointer = reinterpret_cast< const u8 * >( p_base );
 	SetRegisterSpanList( register_usage, entry_address == exit_address );
@@ -2079,6 +2105,23 @@ CJumpLocation	CCodeGeneratorPSP::GenerateOpCode( const STraceEntry& ti, bool bra
 //	calling this function.
 //
 
+// Move COUNT and the event countdown forward (before a call out of the
+// fragment) or back (after it returns) by the instructions this fragment has
+// already run. See DAEDALUS_EXACT_COUNT_READ. Uses (clobbers) t0 and t1.
+void	CCodeGeneratorPSP::GenerateCountAdjust( bool forward, EPspReg t0, EPspReg t1 )
+{
+	if( mInstructionsExecuted == 0 || mInstructionsExecuted > 0x7fff )
+		return;
+
+	const s16 n = s16( mInstructionsExecuted * COUNTER_INCREMENT_PER_OP );
+	GetVar( t0, &gCPUState.CPUControl[C0_COUNT]._u32 );
+	GetVar( t1, (const u32*)&gCPUState.Events[0].mCount );
+	ADDIU( t0, t0, forward ? n : s16( -n ) );
+	ADDIU( t1, t1, forward ? s16( -n ) : n );
+	SetVar( &gCPUState.CPUControl[C0_COUNT]._u32, t0 );
+	SetVar( (u32*)&gCPUState.Events[0].mCount, t1 );
+}
+
 void	CCodeGeneratorPSP::GenerateGenericR4300( OpCode op_code, CPU_Instruction p_instruction )
 {
 	mPreviousLoadBase = N64Reg_R0;	//Invalidate
@@ -2114,6 +2157,20 @@ void	CCodeGeneratorPSP::GenerateGenericR4300( OpCode op_code, CPU_Instruction p_
 	call_target = reinterpret_cast< const void * >( &PerfLog::FallbackThunk );
 #endif
 
+#if DAEDALUS_EXACT_COUNT_READ
+	// A COP0 instruction run by the interpreter (MTC0 to COMPARE, COUNT, SR..)
+	// may read COUNT or schedule an event relative to "now". Inside a fragment
+	// COUNT and the event countdown are behind by the instructions already
+	// run, so move them forward for the call and back afterwards (the fragment
+	// exit adds the full count as usual). Event counts are deltas, so moving
+	// back the front event is right even if the call changed the queue.
+	const bool count_adjust = ( op_code.op == OP_COPRO0 );
+	if( count_adjust )
+	{
+		GenerateCountAdjust( true, PspReg_V0, PspReg_V1 );
+	}
+#endif
+
 	// Load the opcode in to A0
 	GetLoadConstantOps( PspReg_A0, op_code._u32, &op1, &op2 );
 
@@ -2128,6 +2185,13 @@ void	CCodeGeneratorPSP::GenerateGenericR4300( OpCode op_code, CPU_Instruction p_
 		JAL( CCodeLabel( call_target ), false );		// No branch delay
 		AppendOp( op2 );
 	}
+
+#if DAEDALUS_EXACT_COUNT_READ
+	if( count_adjust )
+	{
+		GenerateCountAdjust( false, PspReg_V0, PspReg_V1 );
+	}
+#endif
 }
 
 
@@ -2207,6 +2271,9 @@ void	CCodeGeneratorPSP::GenerateSlowLoad( u32 current_pc, EPspReg psp_dst, EPspR
 	{
 		OR( PspReg_A0, reg_address, PspReg_R0 );
 	}
+#if DAEDALUS_EXACT_COUNT_READ
+	GenerateCountAdjust( true, PspReg_V0, PspReg_V1 );	// A0 holds the address
+#endif
 	PspOpCode	op1, op2;
 	GetLoadConstantOps( PspReg_A1, current_pc, &op1, &op2 );
 
@@ -2222,6 +2289,9 @@ void	CCodeGeneratorPSP::GenerateSlowLoad( u32 current_pc, EPspReg psp_dst, EPspR
 		JAL( CCodeLabel( reinterpret_cast< const void * >( p_read_memory ) ), false );
 		AppendOp( op2 );
 	}
+#if DAEDALUS_EXACT_COUNT_READ
+	GenerateCountAdjust( false, PspReg_A0, PspReg_A1 );	// V0 holds the value read
+#endif
 
 	// Restore all registers BEFORE copying back final value
 	RestoreAllRegisters( mRegisterCache, current_regs );
@@ -2530,6 +2600,9 @@ inline void	CCodeGeneratorPSP::GenerateSlowStore( u32 current_pc, EPspReg psp_sr
 	{
 		OR( PspReg_A1, psp_src, PspReg_R0 );
 	}
+#if DAEDALUS_EXACT_COUNT_READ
+	GenerateCountAdjust( true, PspReg_V0, PspReg_V1 );	// A0, A1 hold address and value
+#endif
 	PspOpCode	op1, op2;
 	GetLoadConstantOps( PspReg_A2, current_pc, &op1, &op2 );
 
@@ -2545,6 +2618,9 @@ inline void	CCodeGeneratorPSP::GenerateSlowStore( u32 current_pc, EPspReg psp_sr
 		JAL( CCodeLabel( reinterpret_cast< const void * >( p_write_memory ) ), false );		// Don't set branch delay slot
 		AppendOp( op2 );
 	}
+#if DAEDALUS_EXACT_COUNT_READ
+	GenerateCountAdjust( false, PspReg_A0, PspReg_A1 );
+#endif
 
 	// Restore all registers BEFORE copying back final value
 	RestoreAllRegisters( mRegisterCache, current_regs );
@@ -5447,6 +5523,23 @@ inline void	CCodeGeneratorPSP::GenerateMFC0( EN64Reg rt, u32 fs )
 	EPspReg reg_dst( GetRegisterNoLoadLo( rt, PspReg_V0 ) );
 
 	GetVar( reg_dst, &gCPUState.CPUControl[ fs ]._u32 );
+#if DAEDALUS_EXACT_COUNT_READ
+	// COUNT in memory is only brought up to date when the fragment exits, so
+	// add the instructions this fragment has already run. This gives the same
+	// value the interpreter reads (it adds 1 after every instruction).
+	if( fs == C0_COUNT && mInstructionsExecuted != 0 )
+	{
+		if( mInstructionsExecuted <= 0x7fff )
+		{
+			ADDIU( reg_dst, reg_dst, s16( mInstructionsExecuted ) );
+		}
+		else
+		{
+			LoadConstant( PspReg_A0, s32( mInstructionsExecuted ) );
+			ADDU( reg_dst, reg_dst, PspReg_A0 );
+		}
+	}
+#endif
 	UpdateRegister( rt, reg_dst, URO_HI_SIGN_EXTEND );
 }
 
