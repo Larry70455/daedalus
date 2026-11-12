@@ -31,7 +31,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //
 
 CIndirectExitMap::CIndirectExitMap()
-:	mpCache( nullptr )
+:	mLastAddress( 0 )
+,	mLastTarget( nullptr )
+,	mpCache( nullptr )
 {
 }
 
@@ -72,6 +74,17 @@ const void *	 IndirectExitMap_Lookup( CIndirectExitMap * p_map, u32 exit_address
 	}
 
 	return nullptr;
+}
+
+const void *	 IndirectExitMap_LookupAndCache( CIndirectExitMap * p_map, u32 exit_address )
+{
+	const void * target = IndirectExitMap_Lookup( p_map, exit_address );
+	if( target != nullptr )
+	{
+		p_map->mLastAddress = exit_address;
+		p_map->mLastTarget = target;
+	}
+	return target;
 }
 
 }

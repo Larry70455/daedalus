@@ -34,6 +34,12 @@ class CIndirectExitMap
 		CFragment *				LookupIndirectExit( u32 exit_address );
 		void					SetCache( const CFragmentCache * p_cache )				{ mpCache = p_cache; }
 
+		// One entry cache for generated code (CCodeGeneratorPSP::GenerateIndirectExitCode):
+		// the last target address and the code of the fragment found for it.
+		// Generated code reads these two words directly, so keep them first.
+		u32						mLastAddress;
+		const void *			mLastTarget;
+
 	private:
 		const CFragmentCache *	mpCache;
 };
@@ -42,5 +48,7 @@ class CIndirectExitMap
 //	C-stub to allow easy access from dynarec code
 //
 extern "C" { const void *	 IndirectExitMap_Lookup( CIndirectExitMap * p_map, u32 exit_address ); }
+// As above, and remembers a hit in mLastAddress / mLastTarget
+extern "C" { const void *	 IndirectExitMap_LookupAndCache( CIndirectExitMap * p_map, u32 exit_address ); }
 
 #endif // DYNAREC_INDIRECTEXITMAP_H_

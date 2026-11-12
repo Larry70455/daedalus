@@ -35,6 +35,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "Utility/MathUtil.h"
 #include "Ultra/ultra_R4300.h"
 #include "CodeGeneratorPSP.h"
+#include "DynaRec/IndirectExitMap.h"
 #include "Base/Macros.h"
 #include "Debug/PrintOpCode.h"
 #include "Utility/Profiler.h"
@@ -1317,6 +1318,67 @@ void CCodeGeneratorPSP::GenerateEretExitCode( u32 num_instructions, CIndirectExi
 void CCodeGeneratorPSP::GenerateIndirectExitCode( u32 num_instructions, CIndirectExitMap * p_map )
 {
 	FlushAllRegisters( mRegisterCache, false );
+
+#if DAEDALUS_INLINE_EXIT_CHECK
+	{
+		// Inline version of _IndirectExitCheck (DynaRecStubs.S) with a one
+		// entry cache: if the target is the same as last time (a "jr ra" that
+		// keeps returning to the same caller), jump straight to its fragment
+		// without calling into C. COUNT and the event countdown are updated
+		// inline as in GenerateExitCode. Like the stub, StuffToDo is checked
+		// on every exit (not only when an event fires), because earlier code
+		// in the fragment (e.g. a hardware register write) may have set it.
+		GetVar( PspReg_A2, &gCPUState.TargetPC );
+		GetVar( PspReg_V0, &gCPUState.CPUControl[C0_COUNT]._u32 );
+		GetVar( PspReg_V1, (const u32*)&gCPUState.Events[0].mCount );
+		ADDIU( PspReg_V0, PspReg_V0, num_instructions );
+		SetVar( &gCPUState.CPUControl[C0_COUNT]._u32, PspReg_V0 );
+		ADDIU( PspReg_V1, PspReg_V1, -s16( num_instructions ) );
+		CJumpLocation to_event( BLEZ( PspReg_V1, CCodeLabel( nullptr ), false ) );
+		SetVar( (u32*)&gCPUState.Events[0].mCount, PspReg_V1 );	// delay slot (single store)
+		GetVar( PspReg_V1, (const u32*)&gCPUState.StuffToDo );
+		CJumpLocation to_stuff( BNE( PspReg_V1, PspReg_R0, CCodeLabel( nullptr ), true ) );
+
+		// Cache check (A2 = target)
+		CCodeLabel check_label( GetAssemblyBuffer()->GetLabel() );
+		const s16 target_offset = s16( reinterpret_cast< const u8 * >( &p_map->mLastTarget ) - reinterpret_cast< const u8 * >( &p_map->mLastAddress ) );
+		LoadConstant( PspReg_A1, reinterpret_cast< s32 >( &p_map->mLastAddress ) );
+		LW( PspReg_V0, PspReg_A1, 0 );
+		CJumpLocation miss( BNE( PspReg_V0, PspReg_A2, CCodeLabel( nullptr ), true ) );
+		LW( PspReg_V0, PspReg_A1, target_offset );
+		JR( PspReg_V0, true );
+
+		// Miss: look it up (and remember it); back to the dispatcher if not compiled
+		PatchJumpLong( miss, GetAssemblyBuffer()->GetLabel() );
+		SetVar( &gCPUState.CurrentPC, PspReg_A2 );
+		SetVar( &gCPUState.Delay, NO_DELAY );
+		LoadConstant( PspReg_A0, reinterpret_cast< s32 >( p_map ) );
+		OR( PspReg_A1, PspReg_A2, PspReg_R0 );
+		JAL( CCodeLabel( reinterpret_cast< const void * >( IndirectExitMap_LookupAndCache ) ), true );
+		CJumpLocation not_compiled( BEQ( PspReg_V0, PspReg_R0, CCodeLabel( nullptr ), true ) );
+		JR( PspReg_V0, true );
+		CCodeLabel dispatcher_label( GetAssemblyBuffer()->GetLabel() );
+		PatchJumpLong( not_compiled, dispatcher_label );
+		J( CCodeLabel( reinterpret_cast< const void * >( _ReturnFromDynaRec ) ), true );
+
+		// StuffToDo already set: record where to resume and leave
+		PatchJumpLong( to_stuff, GetAssemblyBuffer()->GetLabel() );
+		SetVar( &gCPUState.CurrentPC, PspReg_A2 );
+		SetVar( &gCPUState.Delay, NO_DELAY );
+		J( dispatcher_label, true );
+
+		// An event is due
+		PatchJumpLong( to_event, GetAssemblyBuffer()->GetLabel() );
+		SetVar( &gCPUState.CurrentPC, PspReg_A2 );
+		SetVar( &gCPUState.Delay, NO_DELAY );
+		JAL( CCodeLabel( reinterpret_cast< const void * >( CPU_HANDLE_COUNT_INTERRUPT ) ), true );
+		GetVar( PspReg_V0, (const u32*)&gCPUState.StuffToDo );
+		BNE( PspReg_V0, PspReg_R0, dispatcher_label, true );
+		GetVar( PspReg_A2, &gCPUState.CurrentPC );
+		J( check_label, true );
+		return;
+	}
+#endif
 
 	// New return address is in gCPUState.TargetPC
 	PspOpCode op1, op2;
