@@ -51,6 +51,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "RomFile/RomFile.h"
 #include "Utility/Stream.h"
 #include "Debug/Synchroniser.h"
+#include "Native/NativeCode.h"
 #ifdef DAEDALUS_PSP
 #include "SysPSP/Utility/OverclockPSP.h"
 #endif
@@ -528,6 +529,9 @@ bool ROM_LoadFile(const RomID & rom_id, const RomSettings & settings, const SRom
 
 	// Read and apply preferences from preferences.ini
 	preferences.Apply();
+
+	// Precompiled native code for this ROM, if any (Source/Native)
+	Native_RomOpened( g_ROM.mRomID.CRC[ 0 ], g_ROM.mRomID.CRC[ 1 ] );
 
 #ifdef DAEDALUS_PSP
 	// "CPU 400 MHz" setting (no-op when it is off and the clock is normal)

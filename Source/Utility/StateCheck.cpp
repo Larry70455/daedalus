@@ -33,6 +33,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "System/SystemInit.h"
 #include "Utility/Paths.h"
 #include "Utility/PerfLog.h"
+#include "Native/NativeCode.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -53,6 +54,10 @@ static int		gPatchesOverride = -1;	// patches=0|1 overrides the OS function patc
 static bool		gHashRam = true;	// ramhash=0 in statecheck.txt turns the RAM checksum off (for timing runs)
 static u32		gLoadAt = 0;	// loadat=N: load the savestate through the in game path (CPU_RequestLoadState) at vertical blank N instead of before starting
 static std::string	gSaveStatePath;
+static u32		gDumpAddress = 0;	// dump=<hex address>,<words>: print these RDRAM words every frame
+static u32		gDumpWords = 0;
+static bool		gOsList = false;	// oslist=1: write the OS functions Daedalus found to statecheck_os.txt at the end
+static u32		gRamDumpFrame = ~0u;	// ramdump=N: write all of RDRAM to statecheck_ram.bin at vertical blank N
 
 // FNV-1a over 32 bit words. Not cryptographic, only needs to change when the
 // data changes.
@@ -68,8 +73,20 @@ static u32 HashWords( const void * data, u32 bytes )
 	return h;
 }
 
+#ifdef DAEDALUS_ENABLE_OS_HOOKS
+extern void Patch_ForEachFunction( void ( *fn )( u32 vram, const char * name ) );
+static FILE * gOsListFile = nullptr;
+#endif
+
 static void Finish()
 {
+#ifdef DAEDALUS_ENABLE_OS_HOOKS
+	if( gOsList && ( gOsListFile = fopen( setBasePath( "statecheck_os.txt" ).string().c_str(), "w" ) ) != nullptr )
+	{
+		Patch_ForEachFunction( []( u32 vram, const char * name ) { fprintf( gOsListFile, "%08x %s\n", vram, name ); } );
+		fclose( gOsListFile );
+	}
+#endif
 	if( gOut != nullptr )
 	{
 		fprintf( gOut, "# done after %u vertical blanks\n", gFrame );
@@ -118,6 +135,15 @@ bool StateCheck_Start()
 		else if( key == "memopt" )		gMemOptOverride = std::atoi( value.c_str() );
 		else if( key == "audio" )		gAudioOverride = std::atoi( value.c_str() );
 		else if( key == "loadat" )		gLoadAt = (u32)std::strtoul( value.c_str(), nullptr, 10 );
+		else if( key == "oslist" )		gOsList = ( value != "0" );
+		else if( key == "ramdump" )	gRamDumpFrame = (u32)std::strtoul( value.c_str(), nullptr, 10 );
+		else if( key == "native" )		gNativeCodeEnabled = ( value != "0" );
+		else if( key == "dump" )
+		{
+			gDumpAddress = (u32)std::strtoul( value.c_str(), nullptr, 16 );
+			size_t comma = value.find( ',' );
+			gDumpWords = comma == std::string::npos ? 8 : (u32)std::strtoul( value.c_str() + comma + 1, nullptr, 10 );
+		}
 		else if( key == "ramhash" )		gHashRam = ( value != "0" );
 	}
 
@@ -190,9 +216,24 @@ void StateCheck_OnVerticalBlank()
 
 	for( u32 i = 0; i < 32; ++i )
 		fprintf( gOut, " %016llx", (unsigned long long)s.CPU[ i ]._u64 );
-	fprintf( gOut, " | vi_origin %08x\n", Memory_VI_GetRegister( VI_ORIGIN_REG ) );
+	fprintf( gOut, " | vi_origin %08x", Memory_VI_GetRegister( VI_ORIGIN_REG ) );
+	if( gDumpWords > 0 )
+	{
+		fprintf( gOut, " | mem" );
+		for( u32 i = 0; i < gDumpWords; ++i )
+			fprintf( gOut, " %08x", *(u32 *)( g_pu8RamBase + ( ( gDumpAddress & 0x1FFFFFFF ) + i * 4 ) ) );
+	}
+	if( Native_ModuleName() != nullptr )
+		fprintf( gOut, " | native inserted %u calls %u ops %u guest_calls %u guest_ops %u hash_mismatch %u",
+				 gNativeStats.Inserted, gNativeStats.NativeCalls, gNativeStats.NativeOps, gNativeStats.GuestCalls, gNativeStats.GuestOps, gNativeStats.HashMismatch );
+	fprintf( gOut, "\n" );
 	fflush( gOut );	// keep the dump readable even if the run crashes or is killed
 
+	if( gFrame == gRamDumpFrame )
+	{
+		FILE * fp = fopen( setBasePath( "statecheck_ram.bin" ).string().c_str(), "wb" );
+		if( fp ) { fwrite( g_pu8RamBase, 1, gRamSize, fp ); fclose( fp ); }
+	}
 	gFrame++;
 	if( gLoadAt != 0 && gFrame == gLoadAt && !gSaveStatePath.empty() )
 		printf( "StateCheck: in game load of %s: %d\n", gSaveStatePath.c_str(), (int)CPU_RequestLoadState( setBasePath( gSaveStatePath ) ) );

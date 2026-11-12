@@ -21,3 +21,4 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 void Inter_Reset();
 void Inter_SelectCore();
+void Inter_ExecuteOneOp();	// one instruction, no tracing (used by native code)

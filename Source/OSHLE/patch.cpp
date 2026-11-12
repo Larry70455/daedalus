@@ -211,6 +211,26 @@ void Patch_PatchAll()
 #endif
 }
 
+// The HLE function for the OS function that starts at vram, if any (used by
+// native code to call OS functions the same way the dynarec does)
+PatchFunction Patch_GetFunctionAt( u32 vram )
+{
+	for (u32 i = 0; i < nPatchSymbols; i++)
+	{
+		if (g_PatchSymbols[i]->Found && PHYS_TO_K0(g_PatchSymbols[i]->Location) == vram)
+			return g_PatchSymbols[i]->Function;
+	}
+	return nullptr;
+}
+
+// Calls fn with the address and name of every patched OS function
+void Patch_ForEachFunction( void ( *fn )( u32 vram, const char * name ) )
+{
+	for (u32 i = 0; i < nPatchSymbols; i++)
+		if (g_PatchSymbols[i]->Found)
+			fn( PHYS_TO_K0(g_PatchSymbols[i]->Location), g_PatchSymbols[i]->Name );
+}
+
 void Patch_ApplyPatch(u32 i [[maybe_unused]])
 {
 #ifdef DAEDALUS_ENABLE_DYNAREC

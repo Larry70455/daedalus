@@ -197,6 +197,10 @@ void CFragmentCache::InsertFragment( CFragment * p_fragment )
 	mpCacheHashTable[ix].addr = fragment_address;
 	mpCacheHashTable[ix].ptr = reinterpret_cast< uintptr_t >( p_fragment );
 
+	// The last lookup may have cached "no fragment" for this address
+	if( mCachedFragmentAddress == fragment_address )
+		mpCachedFragment = p_fragment;
+
 	// Process any jumps for this before inserting new ones
 	JumpMap::iterator	jump_it( mJumpMap.find( fragment_address ) );
 	if( jump_it != mJumpMap.end() )

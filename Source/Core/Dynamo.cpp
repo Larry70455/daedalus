@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "Base/Types.h"
 #include "Core/Dynamo.h"
+#include "Native/NativeCode.h"
 
 
 
@@ -515,6 +516,10 @@ void CPU_HandleDynaRecOnBranch( bool backwards, bool trace_already_enabled )
 		#ifdef DAEDALUS_PROFILE_EXECUTION
 			gFragmentLookupFailure++;
 		#endif
+			// Precompiled native code for this address (Source/Native): it is
+			// inserted as a fragment, the next lookup finds and runs it
+			if( Native_TryInsert( gCPUState.CurrentPC ) )
+				continue;
 			if( start_of_trace )
 			{
 				start_of_trace = false;

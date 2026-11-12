@@ -1,0 +1,25 @@
+# Super Mario 64 (USA): functions to run as native code.
+# Found by Tools/native_recomp/find_candidates.py style scanning: functions
+# whose only calls are OS functions Daedalus handles with HLE and that never
+# switch threads (bcopy, memcpy, osGetTime, osVirtualToPhysical), with no FPU
+# instructions. The called OS functions get a guest_ prefix: N64Recomp
+# handles the real libultra names itself, here they must stay calls back
+# into Daedalus.
+segment 0x1000 0x80246000
+
+func func_80279bc8 0x80279BC8 0x7C
+func func_8027e3e0 0x8027E3E0 0xB0
+func func_8027e490 0x8027E490 0x90
+func func_8027e520 0x8027E520 0xAC
+func func_8027e5cc 0x8027E5CC 0x90
+func func_8032255c 0x8032255C 0x70
+func func_80322940 0x80322940 0x11C
+
+extern guest_bcopy 0x80324910
+extern guest_osGetTime 0x80325070
+extern guest_memcpy 0x803273F0
+extern guest_osVirtualToPhysical 0x80327EB0
+
+# dma_read (0x80278504, 0x10C) also recompiles and runs, but it waits for the
+# DMA with osRecvMesg, which switches threads while the native function is
+# suspended; that still hangs the game a few frames later (NATIVE_CODE.md, Limits).

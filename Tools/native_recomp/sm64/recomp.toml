@@ -1,0 +1,7 @@
+[input]
+elf_path = "funcs.elf"
+output_func_path = "recomp_out"
+single_file_output = true
+
+[patches]
+ignored = [ "guest_bcopy", "guest_memcpy", "guest_osGetTime", "guest_osVirtualToPhysical" ]

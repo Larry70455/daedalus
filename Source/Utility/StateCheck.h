@@ -43,6 +43,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //                            through the pause menu path. Default: the ROM
 //                            browser path, which boots first and loads once
 //                            the game has drawn a few frames)
+//   native=0                (optional: do not use precompiled native code)
+//   dump=<hex addr>,<words> (optional: print these RDRAM words every frame)
+//   ramdump=N               (optional: write all RDRAM to statecheck_ram.bin at frame N)
+//   oslist=1                (optional: write the OS functions Daedalus patches to
+//                            statecheck_os.txt, for Tools/native_recomp/find_candidates.py)
 //   ramhash=0               (optional: skip the RAM checksum. It costs tens
 //                            of milliseconds per frame on a PSP, so turn it
 //                            off when the run is used for timing)

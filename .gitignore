@@ -28,3 +28,6 @@ Source/tmp
 /vcpkg_installed/
 /CMakeSettings.json
 .vscode/
+# Native code modules generated from commercial ROMs stay local (see NATIVE_CODE.md)
+Source/Native/Generated/*.c
+!Source/Native/Generated/native_test.c

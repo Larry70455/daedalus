@@ -68,8 +68,10 @@ public:
 		CFragment( std::shared_ptr<CCodeBufferManager> p_manager, u32 entry_address, u32 exit_address,
 			const TraceBuffer & trace, SRegisterUsageInfo &	register_usage, const BranchBuffer & branch_details, bool need_indirect_exit_map );
 #ifdef DAEDALUS_ENABLE_OS_HOOKS
-		CFragment(std::shared_ptr<CCodeBufferManager> p_manager, u32 entry_address, u32 input_length, void* function_Ptr);
-		void		Assemble( std::shared_ptr<CCodeBufferManager> p_manager, CCodeLabel native_function);
+		// exit_cycles: instructions charged when the function returns (OS patches: 100,
+		// native code: 1, it charges the rest itself)
+		CFragment(std::shared_ptr<CCodeBufferManager> p_manager, u32 entry_address, u32 input_length, void* function_Ptr, u32 exit_cycles = 100);
+		void		Assemble( std::shared_ptr<CCodeBufferManager> p_manager, CCodeLabel native_function, u32 exit_cycles );
 #endif
 		~CFragment();
 

@@ -108,7 +108,7 @@ CFragment::CFragment( std::shared_ptr<CCodeBufferManager> p_manager,
 // Create a Fragement for Patch Function
 //*************************************************************************************
 CFragment::CFragment(std::shared_ptr<CCodeBufferManager> p_manager, u32 entry_address,
-						u32 function_length, void* function_Ptr)
+						u32 function_length, void* function_Ptr, u32 exit_cycles)
 	:	mEntryAddress( entry_address )
 	,	mInputLength(function_length  * sizeof( OpCode ) )
 	,	mOutputLength( 0 )
@@ -124,7 +124,7 @@ CFragment::CFragment(std::shared_ptr<CCodeBufferManager> p_manager, u32 entry_ad
 	,	mpCache( nullptr )
 #endif
 {
-	Assemble(p_manager, CCodeLabel(function_Ptr));
+	Assemble(p_manager, CCodeLabel(function_Ptr), exit_cycles);
 }
 #endif
 //*************************************************************************************
@@ -835,7 +835,7 @@ void CFragment::Assemble( std::shared_ptr<CCodeBufferManager> p_manager,
 //*************************************************************************************
 //
 //*************************************************************************************
-void CFragment::Assemble( std::shared_ptr<CCodeBufferManager> p_manager, CCodeLabel function_ptr)
+void CFragment::Assemble( std::shared_ptr<CCodeBufferManager> p_manager, CCodeLabel function_ptr, u32 exit_cycles)
 {
 	std::vector< CJumpLocation >		exception_handler_jumps;
 	std::vector< RegisterSnapshotHandle> exception_handler_snapshots;
@@ -852,9 +852,9 @@ void CFragment::Assemble( std::shared_ptr<CCodeBufferManager> p_manager, CCodeLa
 #endif
 
 	CJumpLocation jump = p_generator->ExecuteNativeFunction(function_ptr, true);
-	p_generator->GenerateIndirectExitCode(100, mpIndirectExitMap);
+	p_generator->GenerateIndirectExitCode(exit_cycles, mpIndirectExitMap);
 	AssemblyUtils::PatchJumpLong(jump, p_generator->GetCurrentLocation());
-	p_generator->GenerateEretExitCode(100, mpIndirectExitMap);
+	p_generator->GenerateEretExitCode(exit_cycles, mpIndirectExitMap);
 
 	p_generator->Finalise( HandleException, exception_handler_jumps, exception_handler_snapshots );
 	mFragmentFunctionLength = p_manager->FinaliseCurrentBlock();

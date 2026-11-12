@@ -1,0 +1,10 @@
+# N64Recomp configuration for the native code test ROM.
+# Only native_checksum is recompiled; every other function is ignored, so
+# calls to them go back to the emulator (see Source/Native/NativeCode.cpp).
+[input]
+elf_path = "native_test.elf"
+output_func_path = "recomp_out"
+single_file_output = true
+
+[patches]
+ignored = [ "_start", "helper_mix", "native_checksum_v2", "native_checksum_v2_end", "invalidate_icache", "main" ]

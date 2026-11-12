@@ -129,6 +129,12 @@ template< bool TranslateOp > inline void CPU_EXECUTE_OP()
 }
 
 
+// Runs one instruction (used by native code to run guest functions)
+void Inter_ExecuteOneOp()
+{
+	CPU_EXECUTE_OP< false >();
+}
+
 //*****************************************************************************
 // Keep executing instructions until there are other tasks to do (i.e. gCPUState.GetStuffToDo() is set)
 // Process these tasks and loop
