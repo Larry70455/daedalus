@@ -39,6 +39,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //   audio=0|1|2             (optional: 0 audio off, 1 async on the Media Engine,
 //                            2 sync on the main CPU; default keeps the ROM setting,
 //                            which is off on the PSP)
+//   loadat=N                (optional: load the savestate at vertical blank N
+//                            through the pause menu path. Default: the ROM
+//                            browser path, which boots first and loads once
+//                            the game has drawn a few frames)
 //   ramhash=0               (optional: skip the RAM checksum. It costs tens
 //                            of milliseconds per frame on a PSP, so turn it
 //                            off when the run is used for timing)

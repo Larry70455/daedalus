@@ -28,6 +28,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "Core/CPU.h"
 #include "Core/ROM.h"
 #include "Core/R4300.h"
+#include "Core/Interrupt.h"
 #include "Debug/DBGConsole.h"
 #include "Interface/RomDB.h"
 #include "Utility/MathUtil.h"
@@ -367,6 +368,13 @@ bool SaveState_LoadFromFile( const std::filesystem::path &filename )
 	stream.read(g_pMemoryBuffers[MEM_PIF_RAM], 0x40);
 	stream.read(g_pMemoryBuffers[MEM_RD_RAM], gRamSize);
 	stream.read_memory_buffer(MEM_SP_MEM); //, 0x84000000);
+
+	// Re-check pending interrupts now that the whole state is loaded.
+	// The loop above writes SR (via R4300_SetSR, which looks for pending
+	// interrupts) BEFORE it writes CAUSE, so an interrupt that was pending in
+	// the savestate (for example a vertical blank) was only noticed later.
+	R4300_Interrupt_UpdateCause3();
+	gCPUState.AddJob( CPU_CHECK_INTERRUPTS );
 
 #ifdef DAEDALUS_ENABLE_OS_HOOKS
 	Patch_PatchAll();

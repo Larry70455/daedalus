@@ -90,6 +90,19 @@ enum ESaveStateOperation
 
 static ESaveStateOperation		gSaveStateOperation(SSO_NONE);
 
+// Loading a savestate before the game has booted far enough (from the ROM
+// browser, with the CPU not running yet) leaves emulator side state that the
+// game set up during boot (graphics and texture state, among others) empty.
+// Pokemon Stadium 2 then corrupts memory and shows a black screen, while the
+// same savestate loads fine once the game has drawn a few frames. So such a
+// load is deferred: the ROM boots normally and the savestate is applied once
+// this many display lists have been processed (or after kDeferredLoadMaxVbls
+// vertical blanks for a game that draws nothing).
+static const u32		kDeferredLoadDisplayLists = 30;
+static const u32		kDeferredLoadMaxVbls = 600;
+static bool			gDeferredLoad = false;
+static u32			gDeferredLoadVbls = 0;
+
 const  u32			kInitialVIInterruptCycles = 62500;
 static u32			gVerticalInterrupts = 0;
 static u32			VI_INTR_CYCLES(kInitialVIInterruptCycles);
@@ -469,12 +482,38 @@ bool CPU_RequestLoadState( const std::filesystem::path &filename )
 	return true;	// XXXX could fail
 }
 
+bool CPU_RequestLoadStateAfterBoot( const std::filesystem::path &filename )
+{
+	std::scoped_lock lock(gSaveStateMutex);
+
+	if( gSaveStateOperation != SSO_NONE )
+	{
+		return false;
+	}
+
+	gSaveStateOperation = SSO_LOAD;
+	gSaveStateFilename = filename.string();
+	gDeferredLoad = true;
+	gDeferredLoadVbls = 0;
+
+	return true;
+}
+
 static void HandleSaveStateOperationOnVerticalBlank()
 {
 	DAEDALUS_ASSERT(gCPURunning, "Expecting the CPU to be running at this point");
 	if( gSaveStateOperation == SSO_NONE )
 		return;
 	std::scoped_lock lock(gSaveStateMutex);
+
+	// See kDeferredLoadDisplayLists: wait until the game has booted
+	if( gDeferredLoad )
+	{
+		extern u32 gRDPFrame;	// display lists processed since the ROM was opened
+		if( gRDPFrame < kDeferredLoadDisplayLists && ++gDeferredLoadVbls < kDeferredLoadMaxVbls )
+			return;
+		gDeferredLoad = false;
+	}
 
 	//
 	// Handle the save state

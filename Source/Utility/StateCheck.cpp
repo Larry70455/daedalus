@@ -51,6 +51,8 @@ static int		gAudioOverride = -1;
 static int		gMemOptOverride = -1;
 static int		gPatchesOverride = -1;	// patches=0|1 overrides the OS function patches (HLE) ROM setting	// memopt=0|1 overrides the "memory access optimisation" ROM setting	// audio=0|1|2 in statecheck.txt (off, async, sync); -1 keeps the ROM setting
 static bool		gHashRam = true;	// ramhash=0 in statecheck.txt turns the RAM checksum off (for timing runs)
+static u32		gLoadAt = 0;	// loadat=N: load the savestate through the in game path (CPU_RequestLoadState) at vertical blank N instead of before starting
+static std::string	gSaveStatePath;
 
 // FNV-1a over 32 bit words. Not cryptographic, only needs to change when the
 // data changes.
@@ -115,6 +117,7 @@ bool StateCheck_Start()
 		else if( key == "patches" )		gPatchesOverride = std::atoi( value.c_str() );
 		else if( key == "memopt" )		gMemOptOverride = std::atoi( value.c_str() );
 		else if( key == "audio" )		gAudioOverride = std::atoi( value.c_str() );
+		else if( key == "loadat" )		gLoadAt = (u32)std::strtoul( value.c_str(), nullptr, 10 );
 		else if( key == "ramhash" )		gHashRam = ( value != "0" );
 	}
 
@@ -132,7 +135,9 @@ bool StateCheck_Start()
 		return false;
 	}
 
-	if( !savestate.empty() && !SaveState_LoadFromFile( setBasePath( savestate ) ) )
+	gSaveStatePath = savestate;
+	// Same path as the ROM browser: boot, then load once the game has drawn (loadat=N loads at vertical blank N instead)
+	if( gLoadAt == 0 && !savestate.empty() && !CPU_RequestLoadStateAfterBoot( setBasePath( savestate ) ) )
 	{
 		printf( "StateCheck: could not load savestate %s\n", savestate.c_str() );
 		return false;
@@ -140,6 +145,7 @@ bool StateCheck_Start()
 
 	// Override the per ROM preferences that System_Open applied
 	gDynarecEnabled = ( mode == "dynarec" );
+	CPU_SelectCore();	// System_Open picked the core from the ROM settings; pick again with the forced mode
 	if( gPatchesOverride >= 0 )
 		gOSHooksEnabled = ( gPatchesOverride != 0 );
 	if( gMemOptOverride >= 0 )
@@ -184,9 +190,12 @@ void StateCheck_OnVerticalBlank()
 
 	for( u32 i = 0; i < 32; ++i )
 		fprintf( gOut, " %016llx", (unsigned long long)s.CPU[ i ]._u64 );
-	fprintf( gOut, "\n" );
+	fprintf( gOut, " | vi_origin %08x\n", Memory_VI_GetRegister( VI_ORIGIN_REG ) );
+	fflush( gOut );	// keep the dump readable even if the run crashes or is killed
 
 	gFrame++;
+	if( gLoadAt != 0 && gFrame == gLoadAt && !gSaveStatePath.empty() )
+		printf( "StateCheck: in game load of %s: %d\n", gSaveStatePath.c_str(), (int)CPU_RequestLoadState( setBasePath( gSaveStatePath ) ) );
 	if( gFrame >= gFramesWanted )
 		Finish();
 }

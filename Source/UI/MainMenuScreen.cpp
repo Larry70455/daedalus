@@ -344,7 +344,10 @@ void	IMainMenuScreen::OnSavestateSelected( const char * savestate_filename )
 
 		System_Open(rom_filename);
 
-		if( !SaveState_LoadFromFile( savestate_filename ) )
+		// Boot the game and apply the savestate once it has drawn a few frames.
+		// Loading it straight away, before the game ever ran, gave a black screen
+		// (see CPU_RequestLoadStateAfterBoot in Core/CPU.cpp).
+		if( !CPU_RequestLoadStateAfterBoot( savestate_filename ) )
 		{
 			// Should report some kind of error
 		}

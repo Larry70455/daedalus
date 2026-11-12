@@ -162,6 +162,7 @@ void	CPU_Skip();
 bool	CPU_Run();
 bool	CPU_RequestSaveState( const std::filesystem::path &filename );
 bool	CPU_RequestLoadState( const std::filesystem::path &filename );
+bool	CPU_RequestLoadStateAfterBoot( const std::filesystem::path &filename );	// Call after System_Open, before CPU_Run: loads the state once the game has booted
 void	CPU_Halt( const char * reason );
 void	CPU_SelectCore();
 u32		CPU_GetVideoInterruptEventCount();
