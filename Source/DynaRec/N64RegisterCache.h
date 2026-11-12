@@ -45,6 +45,7 @@ public:
 					mRegisterCacheInfo[i][lo_hi_idx].Valid = false;
 					mRegisterCacheInfo[i][lo_hi_idx].Dirty = false;
 					mRegisterCacheInfo[i][lo_hi_idx].Known = false;
+					mRegisterCacheInfo[i][lo_hi_idx].SignExtendPending = false;
 				}
 			}
 
@@ -128,6 +129,11 @@ public:
 		}
 
 
+		// Lazy sign extension: the high half of reg equals the sign of its low
+		// half, but memory (and any cached copy) does not hold it yet
+		inline bool	IsHiSignExtendPending( EN64Reg reg ) const			{ return mRegisterCacheInfo[ reg ][ 1 ].SignExtendPending; }
+		inline void	SetHiSignExtendPending( EN64Reg reg, bool pending )	{ mRegisterCacheInfo[ reg ][ 1 ].SignExtendPending = pending; }
+
 		inline bool	IsKnownValue( EN64Reg reg, u32 lo_hi_idx ) const
 		{
 			return mRegisterCacheInfo[ reg ][ lo_hi_idx ].Known;
@@ -200,6 +206,7 @@ public:
 			bool			Valid;				// Is the contents of the register valid?
 			bool			Dirty;				// Is the contents of the register modified?
 			bool			Known;				// Is the contents of the known?
+			bool			SignExtendPending;	// (high half only) the high half is the sign extension of the low half but not written yet, see CCodeGeneratorPSP::MaterializeHi
 			//bool			SignExtended;		// Is this (high) register just sign extension of low reg?
 		};
 

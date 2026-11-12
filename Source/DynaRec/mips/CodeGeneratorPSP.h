@@ -260,6 +260,8 @@ private:
 				const CN64RegisterCachePSP & GetRegisterCacheFromHandle( RegisterSnapshotHandle snapshot ) const;
 
 				void				FlushRegister( CN64RegisterCachePSP & cache, EN64Reg n64_reg, u32 lo_hi_idx, bool invalidate );
+				void				MaterializeHi( CN64RegisterCachePSP & cache, EN64Reg n64_reg );
+				void				MaterializeAllHi( CN64RegisterCachePSP & cache );
 				void				FlushAllRegisters( CN64RegisterCachePSP & cache, bool invalidate );
 				void				FlushAllFloatingPointRegisters( CN64RegisterCachePSP & cache, bool invalidate );
 				void				FlushAllTemporaryRegisters( CN64RegisterCachePSP & cache, bool invalidate );

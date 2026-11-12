@@ -560,10 +560,102 @@ EPspReg	CCodeGeneratorPSP::GetRegisterNoLoad( EN64Reg n64_reg, u32 lo_hi_idx, EP
 }
 
 
+//*****************************************************************************
+// Lazy sign extension of 32 bit results (DAEDALUS_LAZY_SIGN_EXTEND)
+//
+// Almost every N64 instruction produces a 32 bit result that is sign extended
+// to 64 bits. The register allocator only keeps low halves in PSP registers,
+// so the high half used to be computed (SRA) and stored to memory right after
+// every such instruction, two extra instructions including a store. Games
+// rarely read the high half, so now the register cache only notes that the
+// high half "is the sign of the low half" and MaterializeHi writes it when it
+// is actually needed: when the high half is read, when the low half is about
+// to leave its PSP register (flush, spill, call), before an instruction that
+// writes only the low half, and at the loop back edge. The emulated result is
+// exactly the same; only the moment of the store changes.
+//*****************************************************************************
+#ifndef DAEDALUS_LAZY_SIGN_EXTEND
+#define DAEDALUS_LAZY_SIGN_EXTEND 1
+#endif
+
+// Fragment exits update the cycle counter inline instead of calling
+// _DirectExitCheckNoDelay (see GenerateExitCode)
+#ifndef DAEDALUS_INLINE_EXIT_CHECK
+#define DAEDALUS_INLINE_EXIT_CHECK 1
+#endif
+
+void	CCodeGeneratorPSP::MaterializeHi( CN64RegisterCachePSP & cache, EN64Reg n64_reg )
+{
+	if( !cache.IsHiSignExtendPending( n64_reg ) )
+		return;
+	cache.SetHiSignExtendPending( n64_reg, false );
+
+	// K1 as scratch: it holds the last store address (mPreviousStoreBase), so
+	// that cached address is dropped below
+	const EPspReg scratch = PspReg_K1;
+	mPreviousStoreBase = N64Reg_R0;
+	EPspReg src;
+	if( cache.IsKnownValue( n64_reg, 0 ) )
+	{
+		SetVar( &gGPR[ n64_reg ]._u32_1, cache.GetKnownValue( n64_reg, 0 )._s32 >> 31 );
+		cache.MarkAsDirty( n64_reg, 1, false );
+		return;
+	}
+	else if( cache.IsCached( n64_reg, 0 ) && cache.IsValid( n64_reg, 0 ) )
+	{
+		src = cache.GetCachedReg( n64_reg, 0 );
+	}
+	else
+	{
+		GetVar( scratch, &gGPR[ n64_reg ]._u32_0 );
+		src = scratch;
+	}
+
+	if( cache.IsCached( n64_reg, 1 ) )
+	{
+		EPspReg hi = cache.GetCachedReg( n64_reg, 1 );
+		SRA( hi, src, 0x1f );
+		cache.MarkAsValid( n64_reg, 1, true );
+		cache.MarkAsDirty( n64_reg, 1, true );
+	}
+	else
+	{
+		SRA( scratch, src, 0x1f );
+		SetVar( &gGPR[ n64_reg ]._u32_1, scratch );
+		cache.MarkAsDirty( n64_reg, 1, false );
+	}
+}
+
+void	CCodeGeneratorPSP::MaterializeAllHi( CN64RegisterCachePSP & cache )
+{
+	for( u32 i = 1; i < NUM_N64_REGS; i++ )
+		MaterializeHi( cache, EN64Reg( i ) );
+}
+
 //Load value from an emulated N64 register or known value to a PSP register
 
 void	CCodeGeneratorPSP::GetRegisterValue( EPspReg psp_reg, EN64Reg n64_reg, u32 lo_hi_idx )
 {
+	if( lo_hi_idx == 1 && mRegisterCache.IsHiSignExtendPending( n64_reg ) )
+	{
+		// Compute it straight into psp_reg from the low half. No scratch
+		// register: callers may hold an address in K0/K1 (64 bit stores).
+		// It stays pending, memory is written later by MaterializeHi.
+		if( mRegisterCache.IsKnownValue( n64_reg, 0 ) )
+		{
+			LoadConstant( psp_reg, mRegisterCache.GetKnownValue( n64_reg, 0 )._s32 >> 31 );
+		}
+		else if( mRegisterCache.IsCached( n64_reg, 0 ) && mRegisterCache.IsValid( n64_reg, 0 ) )
+		{
+			SRA( psp_reg, mRegisterCache.GetCachedReg( n64_reg, 0 ), 0x1f );
+		}
+		else
+		{
+			GetVar( psp_reg, &gGPR[ n64_reg ]._u32_0 );
+			SRA( psp_reg, psp_reg, 0x1f );
+		}
+		return;
+	}
 	if( mRegisterCache.IsKnownValue( n64_reg, lo_hi_idx ) )
 	{
 		//printf( "Loading %s[%d] <- %08x\n", RegNames[ n64_reg ], lo_hi_idx, mRegisterCache.GetKnownValue( n64_reg, lo_hi_idx ) );
@@ -681,6 +773,10 @@ void	CCodeGeneratorPSP::PrepareCachedRegister( EN64Reg n64_reg, u32 lo_hi_idx )
 
 void CCodeGeneratorPSP::StoreRegister( EN64Reg n64_reg, u32 lo_hi_idx, EPspReg psp_reg )
 {
+	// The instruction redefines this half (the high half explicitly, or the
+	// low half in an instruction that also redefines the high half or that
+	// GenerateOpCode prepared with MaterializeHi)
+	mRegisterCache.SetHiSignExtendPending( n64_reg, false );
 	mRegisterCache.ClearKnownValue( n64_reg, lo_hi_idx );
 
 	if( mRegisterCache.IsCached( n64_reg, lo_hi_idx ) )
@@ -731,6 +827,7 @@ inline void CCodeGeneratorPSP::SetRegister32s( EN64Reg n64_reg, s32 value )
 
 inline void CCodeGeneratorPSP::SetRegister( EN64Reg n64_reg, u32 lo_hi_idx, u32 value )
 {
+	mRegisterCache.SetHiSignExtendPending( n64_reg, false );	// see StoreRegister
 	mRegisterCache.SetKnownValue( n64_reg, lo_hi_idx, value );
 	mRegisterCache.MarkAsDirty( n64_reg, lo_hi_idx, true );
 	if( mRegisterCache.IsCached( n64_reg, lo_hi_idx ) )
@@ -753,6 +850,15 @@ void CCodeGeneratorPSP::UpdateRegister( EN64Reg n64_reg, EPspReg psp_reg, bool o
 
 	if( options == URO_HI_SIGN_EXTEND )
 	{
+#if DAEDALUS_LAZY_SIGN_EXTEND
+		if( mRegisterCache.IsCached( n64_reg, 0 ) && !mRegisterCache.IsCached( n64_reg, 1 ) )
+		{
+			mRegisterCache.ClearKnownValue( n64_reg, 1 );
+			mRegisterCache.MarkAsDirty( n64_reg, 1, false );
+			mRegisterCache.SetHiSignExtendPending( n64_reg, true );
+			return;
+		}
+#endif
 		EPspReg scratch_reg = PspReg_V0;
 		if( mRegisterCache.IsCached( n64_reg, 1 ) )
 		{
@@ -868,6 +974,10 @@ const CN64RegisterCachePSP & CCodeGeneratorPSP::GetRegisterCacheFromHandle( Regi
 
 void CCodeGeneratorPSP::FlushRegister( CN64RegisterCachePSP & cache, EN64Reg n64_reg, u32 lo_hi_idx, bool invalidate )
 {
+	// The high half is written to memory, or the low half is about to leave its register
+	if( lo_hi_idx == 1 || invalidate )
+		MaterializeHi( cache, n64_reg );
+
 	if( cache.IsDirty( n64_reg, lo_hi_idx ) )
 	{
 		if( cache.IsKnownValue( n64_reg, lo_hi_idx ) )
@@ -1037,6 +1147,9 @@ CJumpLocation CCodeGeneratorPSP::GenerateExitCode( u32 exit_address, u32 jump_ad
 		#endif
 		FlushAllFloatingPointRegisters( mRegisterCache, false );
 
+		// The loop top was generated with all high halves in memory
+		MaterializeAllHi( mRegisterCache );
+
 		// Check if we're ok to continue, without flushing any registers
 		GetVar( PspReg_V0, &gCPUState.CPUControl[C0_COUNT]._u32 );
 		GetVar( PspReg_A0, (const u32*)&gCPUState.Events[0].mCount );
@@ -1089,6 +1202,51 @@ CJumpLocation CCodeGeneratorPSP::GenerateExitCode( u32 exit_address, u32 jump_ad
 	}
 
 	FlushAllRegisters( mRegisterCache, true );
+
+#if DAEDALUS_INLINE_EXIT_CHECK
+	if( jump_address == 0 )
+	{
+		// Inline version of _DirectExitCheckNoDelay (DynaRecStubs.S): update
+		// COUNT and the first event's countdown here, and only leave the
+		// fragment's code when an event is due. CurrentPC and Delay are only
+		// written when control really goes back to the dispatcher (event due,
+		// or next fragment not compiled yet); fragments linked to each other
+		// never read them.
+		GetVar( PspReg_V0, &gCPUState.CPUControl[C0_COUNT]._u32 );
+		GetVar( PspReg_V1, (const u32*)&gCPUState.Events[0].mCount );
+		ADDIU( PspReg_V0, PspReg_V0, num_instructions );
+		SetVar( &gCPUState.CPUControl[C0_COUNT]._u32, PspReg_V0 );
+		ADDIU( PspReg_V1, PspReg_V1, -s16( num_instructions ) );
+		CJumpLocation to_event( BLEZ( PspReg_V1, CCodeLabel( nullptr ), false ) );
+		SetVar( (u32*)&gCPUState.Events[0].mCount, PspReg_V1 );	// delay slot (single store)
+
+		// Continue with the next fragment (patched in when it is compiled)
+		CCodeLabel continue_label( GetAssemblyBuffer()->GetLabel() );
+		CJumpLocation jump_to_next_fragment( J( next_fragment, true ) );
+
+		// An event is due: same as _DirectExitCheckCheckCount
+		PatchJumpLong( to_event, GetAssemblyBuffer()->GetLabel() );
+		LoadConstant( PspReg_A1, exit_address );
+		SetVar( &gCPUState.CurrentPC, PspReg_A1 );
+		SetVar( &gCPUState.Delay, NO_DELAY );
+		JAL( CCodeLabel( reinterpret_cast< const void * >( CPU_HANDLE_COUNT_INTERRUPT ) ), true );
+		GetVar( PspReg_V0, (const u32*)&gCPUState.StuffToDo );
+		BEQ( PspReg_V0, PspReg_R0, continue_label, true );
+		J( CCodeLabel( reinterpret_cast< const void * >( _ReturnFromDynaRec ) ), true );
+
+		if( !next_fragment.IsSet() )
+		{
+			// Not compiled yet: back to the dispatcher until AddPatch links it
+			CCodeLabel unlinked( GetAssemblyBuffer()->GetLabel() );
+			LoadConstant( PspReg_A1, exit_address );
+			SetVar( &gCPUState.CurrentPC, PspReg_A1 );
+			SetVar( &gCPUState.Delay, NO_DELAY );
+			J( CCodeLabel( reinterpret_cast< const void * >( _ReturnFromDynaRec ) ), true );
+			PatchJumpLong( jump_to_next_fragment, unlinked );
+		}
+		return jump_to_next_fragment;
+	}
+#endif
 
 	CCodeLabel	exit_routine;
 
@@ -1411,6 +1569,52 @@ static inline bool CanUseNativeDoubleMemOp( bool branch_delay_slot, u32 ft, EN64
 //	Generates instruction handler for the specified op code.
 //	Returns a jump location if an exception handler is required
 
+// The GPR an instruction writes (N64Reg_R0 if none) and whether its
+// generator redefines all 64 bits of it on every path (checked by hand:
+// they end in UpdateRegister / SetRegister32s / SetRegister64).
+static EN64Reg WrittenRegister( OpCode op_code, bool * full )
+{
+	*full = false;
+	switch( op_code.op )
+	{
+	case OP_SPECOP:
+		switch( op_code.spec_op )
+		{
+		case SpecOp_SLL: case SpecOp_SRL: case SpecOp_SRA:
+		case SpecOp_SLLV: case SpecOp_SRLV: case SpecOp_SRAV:
+		case SpecOp_ADDU: case SpecOp_SUBU: case SpecOp_SLT: case SpecOp_SLTU:
+			*full = true;
+			return EN64Reg( op_code.rd );
+		case SpecOp_JR: case SpecOp_SYSCALL: case SpecOp_BREAK: case SpecOp_SYNC:
+		case SpecOp_MTHI: case SpecOp_MTLO:
+		case SpecOp_MULT: case SpecOp_MULTU: case SpecOp_DIV: case SpecOp_DIVU:
+		case SpecOp_DMULT: case SpecOp_DMULTU: case SpecOp_DDIV: case SpecOp_DDIVU:
+		case SpecOp_TGE: case SpecOp_TGEU: case SpecOp_TLT: case SpecOp_TLTU: case SpecOp_TEQ: case SpecOp_TNE:
+			return N64Reg_R0;
+		default:
+			return EN64Reg( op_code.rd );		// everything else writes rd
+		}
+	case OP_JAL:
+		*full = true;
+		return N64Reg_RA;
+	case OP_ADDIU: case OP_SLTI: case OP_SLTIU: case OP_ANDI: case OP_LUI:
+	case OP_LB: case OP_LH: case OP_LW: case OP_LBU: case OP_LHU:
+		*full = true;
+		return EN64Reg( op_code.rt );
+	case OP_ADDI: case OP_ORI: case OP_XORI: case OP_DADDI: case OP_DADDIU:
+	case OP_LDL: case OP_LDR: case OP_LWL: case OP_LWR: case OP_LWU: case OP_LD: case OP_LL: case OP_LLD:
+		return EN64Reg( op_code.rt );
+	case OP_REGIMM:
+		// BLTZAL and friends write ra
+		return ( op_code.regimm_op & 0x10 ) ? N64Reg_RA : N64Reg_R0;
+	case OP_COPRO0: case OP_COPRO1:
+		// MFC0/DMFC0, MFC1/DMFC1/CFC1 write rt (rs field 0, 1, 2)
+		return ( op_code.rs <= 2 ) ? EN64Reg( op_code.rt ) : N64Reg_R0;
+	default:
+		return N64Reg_R0;	// branches, stores, CACHE and so on
+	}
+}
+
 CJumpLocation	CCodeGeneratorPSP::GenerateOpCode( const STraceEntry& ti, bool branch_delay_slot, const SBranchDetails * p_branch, CJumpLocation * p_branch_jump )
 {
 	#ifdef DAEDALUS_PROFILE
@@ -1438,6 +1642,19 @@ CJumpLocation	CCodeGeneratorPSP::GenerateOpCode( const STraceEntry& ti, bool bra
 	const EN64Reg	rt = EN64Reg( op_code.rt );
 	const EN64Reg	rd = EN64Reg( op_code.rd );
 	const EN64Reg	base = EN64Reg( op_code.base );
+
+#if DAEDALUS_LAZY_SIGN_EXTEND
+	// An instruction that writes only the low half of its destination keeps
+	// the old high half, which may still be pending: write that out first.
+	// Instructions known to redefine all 64 bits skip this (see
+	// RedefinesWholeRegister). Everything else writes it out.
+	{
+		bool full = false;
+		EN64Reg dst = WrittenRegister( op_code, &full );
+		if( dst != N64Reg_R0 && !full )
+			MaterializeHi( mRegisterCache, dst );
+	}
+#endif
 	const u32		ft = op_code.ft;
 	const u32		sa = op_code.sa;
 	//const u32		jump_target( (address&0xF0000000) | (op_code.target<<2) );
