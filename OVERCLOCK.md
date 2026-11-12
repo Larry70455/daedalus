@@ -13,7 +13,13 @@ varies (the author reports some units pass 407 MHz, some sit near it, some stay
 below), and an unstable setting crashes the console until it is rebooted.
 Use it at your own risk. I have not tested it on a PSP.
 
-## Built in: Settings, CPU Clock
+## Built in: Settings, CPU Clock (removed)
+
+The setting is no longer in the menu and is no longer applied when a game
+starts: on a PSP Go it made games lag heavily for 30 seconds or more. The
+kernel module (Source/SysPSP/PRX/Overclock) is still built but unused.
+The text below describes how it worked.
+
 
 Global settings now has a **CPU Clock** option: 333 MHz (normal) or 400 MHz.
 It loads `Plugins/overclock.prx`, a small kernel module using the PLL method
