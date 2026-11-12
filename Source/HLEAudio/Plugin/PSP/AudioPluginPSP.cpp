@@ -247,28 +247,17 @@ EProcessResult	AudioPluginPSP::ProcessAList()
 #ifdef DAEDALUS_PSP_USE_ME
 				sceKernelDcacheWritebackInvalidateAll();
 				// BeginME fails when the Media Engine is still busy with the
-				// previous audio job. Running Audio_Ucode() here at the same
-				// time would have both CPUs working on the same audio state,
-				// which corrupts the sound (crackling). So first wait for the
-				// Media Engine to finish (it is normally almost done) and
-				// hand it the new job. The wait is bounded so a stuck Media
-				// Engine cannot hang the emulator; only then fall back to
-				// the main CPU as before.
+				// previous audio job; the job then runs on the main CPU.
+				// An earlier change waited for the Media Engine here instead.
+				// On a real PSP Go that stalled the main CPU so long that
+				// Pokemon Stadium 2 stopped updating the screen with audio on,
+				// so the original behaviour is back.
 				if(BeginME( mei, (int)&Audio_Ucode, (int)NULL, -1, NULL, -1, NULL) < 0)
 				{
-					for( u32 spins = 0; spins < 2000000 && !CheckME( mei ); ++spins ) {}
+					Audio_Ucode();
 				}
-				else
-				{
-					result = PR_COMPLETED;
-					break;
-				}
-				sceKernelDcacheWritebackInvalidateAll();
-				if(BeginME( mei, (int)&Audio_Ucode, (int)NULL, -1, NULL, -1, NULL) < 0){
-						Audio_Ucode();
-						result = PR_COMPLETED;
-						break;
-				}
+				result = PR_COMPLETED;
+				break;
 #else
 				DAEDALUS_ERROR("Async audio is unimplemented");
 				Audio_Ucode();
