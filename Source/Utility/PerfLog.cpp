@@ -26,6 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #ifdef DAEDALUS_PERF_LOG
 
 #include "Core/ROM.h"
+#include "Core/Memory.h"
 #include "Core/R4300OpCode.h"
 #include "Utility/Paths.h"
 
@@ -301,6 +302,7 @@ static void WriteInterpretedHot()
 			 gStats[ kStatFlushICache ], gStats[ kStatFlushOverlap ], gStats[ kStatFlushSize ], gStats[ kStatFlushHotMap ] );
 	fprintf( fh, "# dynarec events: traces started %u, aborted %u, fragments compiled %u\n",
 			 gStats[ kStatTraceStarted ], gStats[ kStatTraceAborted ], gStats[ kStatFragmentCreated ] );
+	fprintf( fh, "# stale code check: %u osInvalICache calls verified without a flush, %u stale compiled instructions found (must be 0)\n", gStats[ kStatInvalChecks ], gStats[ kStatStaleOps ] );
 	fprintf( fh, "# audio underruns (output ran dry, heard as crackle): %u\n", gStats[ kStatAudioUnderrun ] );
 	fprintf( fh, "# Hottest 256 byte blocks (a function or loop usually lives in one or two):\n" );
 	for( size_t i = 0; i < blocks.size() && i < 30; ++i )
@@ -309,6 +311,33 @@ static void WriteInterpretedHot()
 	for( size_t i = 0; i < all.size() && i < 40; ++i )
 		fprintf( fh, "  %08x  %10u  %5.1f%%\n", all[ i ].pc, all[ i ].count, 100.0 * all[ i ].count / (double)total );
 	fclose( fh );
+}
+
+static std::vector< std::pair< u32, u32 > >	gCompiledOps;	// (address, opcode) of everything in the code cache
+
+void NoteCompiledOp( u32 address, u32 op )
+{
+	if( gActive )
+		gCompiledOps.emplace_back( address, op );
+}
+
+void ClearCompiledOps()
+{
+	gCompiledOps.clear();
+}
+
+u32 CountStaleCompiledOps()
+{
+	u32 stale = 0;
+	for( const auto & e : gCompiledOps )
+	{
+		u32 phys = e.first & 0x1FFFFFFF;
+		if( ( e.first & 0xC0000000 ) != 0x80000000 || phys + 4 > gRamSize )
+			continue;	// only KSEG0 / KSEG1 RDRAM is checked
+		if( *reinterpret_cast< const u32 * >( g_pu8RamBase + phys ) != e.second )
+			stale++;
+	}
+	return stale;
 }
 
 void NoteFallbackSite( u32 op_code_bits )

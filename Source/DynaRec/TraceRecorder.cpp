@@ -296,6 +296,10 @@ CFragment *		CTraceRecorder::CreateFragment( std::shared_ptr<CCodeBufferManager>
 {
 	#ifdef DAEDALUS_ENABLE_DYNAREC_PROFILE
 	DAEDALUS_PROFILE( "CTraceRecorder::CreateFragment" );
+#ifdef DAEDALUS_PERF_LOG
+	for( const STraceEntry & e : mTraceBuffer )
+		PerfLog::NoteCompiledOp( e.Address, e.OpCode._u32 );
+#endif
 #endif
 #ifdef DAEDALUS_ENABLE_ASSERTS
 	DAEDALUS_ASSERT( !mTraceBuffer.empty(), "No trace ready for creation?" );

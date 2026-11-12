@@ -33,6 +33,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "DynaRec/FragmentCache.h"
 #include "Debug/DBGConsole.h"
 #include "Utility/Profiler.h"
+#include "Utility/PerfLog.h"
 
 
 //Define to show hash table statistics cache hit/miss
@@ -272,6 +273,9 @@ void CFragmentCache::InsertFragment( CFragment * p_fragment )
 //*************************************************************************************
 void CFragmentCache::Clear()
 {
+#ifdef DAEDALUS_PERF_LOG
+	PerfLog::ClearCompiledOps();	// stale code verifier: the cache is empty again
+#endif
 #ifdef DAEDALUS_DEBUG_CONSOLE
 	if(CDebugConsole::IsAvailable())
 	{

@@ -90,11 +90,19 @@ namespace PerfLog
 		kStatTraceStarted,
 		kStatTraceAborted,
 		kStatFragmentCreated,
-		kStatAudioUnderrun,		// the audio output asked for samples and the buffer was empty (heard as a crackle)
+		kStatAudioUnderrun,
+		kStatInvalChecks,		// osInvalICache calls that did not flush and were verified
+		kStatStaleOps,			// compiled instructions that no longer match memory after such a call (must be 0)		// the audio output asked for samples and the buffer was empty (heard as a crackle)
 		kNumStats
 	};
 	extern u32 gStats[ kNumStats ];
-	void	NoteInterpretedPC( u32 pc );	// Counts one interpreted op and builds the hot address table
+	void	NoteInterpretedPC( u32 pc );
+
+	// Stale code verifier: every compiled instruction is recorded, and
+	// CountStaleCompiledOps compares them all with current memory.
+	void	NoteCompiledOp( u32 address, u32 op );
+	void	ClearCompiledOps();
+	u32		CountStaleCompiledOps();	// Counts one interpreted op and builds the hot address table
 	extern u32 gInterpretedOps;
 	extern u32 gFallbackOps;
 	void	NoteFallbackSite( u32 op_code_bits );	// Called by the dynarec when it emits a fallback call
