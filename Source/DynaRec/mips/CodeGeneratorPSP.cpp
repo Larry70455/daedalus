@@ -80,6 +80,15 @@ using namespace AssemblyUtils;
 // Before, those instructions were simply lost when a fragment was left in
 // the middle, so the timing of later interrupts depended on where fragments
 // happened to start. Set to 0 to get the old behaviour.
+// MULT, DIV and DIVU store the full 64 bit (sign extended) LO and HI results,
+// as the interpreter does and as MULTU already did. Before, the upper 32 bits
+// in memory were left over from an older result, and an MFLO/MFHI in a later
+// fragment (or in the interpreter) read them back into the destination
+// register. Set to 0 to get the old behaviour.
+#ifndef DAEDALUS_MULT_FULL_RESULT
+#define DAEDALUS_MULT_FULL_RESULT 1
+#endif
+
 #ifndef DAEDALUS_EXACT_COUNT_READ
 #define DAEDALUS_EXACT_COUNT_READ 1
 #endif
@@ -2949,7 +2958,7 @@ inline void	CCodeGeneratorPSP::GenerateMULT( EN64Reg rs, EN64Reg rt )
 	SetVar( &gCPUState.MultLo._u32_0, PspReg_V0 );
 	SetVar( &gCPUState.MultHi._u32_0, PspReg_A0 );
 
-#ifdef ENABLE_64BIT
+#if DAEDALUS_MULT_FULL_RESULT
 	SRA( PspReg_V0, PspReg_V0, 0x1f );		// Sign extend
 	SRA( PspReg_A0, PspReg_A0, 0x1f );		// Sign extend
 
@@ -3039,7 +3048,7 @@ inline void	CCodeGeneratorPSP::GenerateDIV( EN64Reg rs, EN64Reg rt )
 	SetVar( &gCPUState.MultLo._u32_0, PspReg_V0 );
 	SetVar( &gCPUState.MultHi._u32_0, PspReg_A0 );
 
-#ifdef ENABLE_64BIT
+#if DAEDALUS_MULT_FULL_RESULT
 	SRA( PspReg_V0, PspReg_V0, 0x1f );		// Sign extend
 	SRA( PspReg_A0, PspReg_A0, 0x1f );		// Sign extend
 
@@ -3100,7 +3109,7 @@ inline void	CCodeGeneratorPSP::GenerateDIVU( EN64Reg rs, EN64Reg rt )
 	SetVar( &gCPUState.MultLo._u32_0, PspReg_V0 );
 	SetVar( &gCPUState.MultHi._u32_0, PspReg_A0 );
 
-#ifdef ENABLE_64BIT
+#if DAEDALUS_MULT_FULL_RESULT
 	SRA( PspReg_V0, PspReg_V0, 0x1f );		// Sign extend
 	SRA( PspReg_A0, PspReg_A0, 0x1f );		// Sign extend
 
