@@ -358,7 +358,7 @@ IGlobalSettingsComponent::IGlobalSettingsComponent( CUIContext * p_context )
 	mElements.Add(std::make_unique<CBoolSetting>( &gGlobalPreferences.HighlightInexactBlendModes, "Highlight Inexact Blend Modes",	"Replace inexact blend modes with a placeholder texture.", "Yes", "No" ) );
 	mElements.Add(std::make_unique<CBoolSetting>( &gGlobalPreferences.CustomBlendModes, "Use Custom Blend Modes",	"Debugging tool to disable custom blendmodes.", "Yes", "No" ) );
 #endif
-#if DAEDALUS_PSP
+#if 0	// 400 MHz: removed from the menu, it made games lag for 30+ seconds on a PSP Go
 	mElements.Add(std::make_unique<COverclockSetting>( "CPU Clock", "400 MHz is an unofficial overclock (psp-beyond-444mhz method). Faster, but a console that is not stable at that speed freezes and must be restarted with the power switch. Takes about 2 seconds to change." ) );
 #endif
 	mElements.Add(std::make_unique<CBoolSetting>( &gGlobalPreferences.BatteryWarning, "Low Battery Warning",	"Whether to allow Daedalus to notify when the battery is low.", "Yes", "No" ) );
