@@ -66,6 +66,13 @@ struct SCodeBuffer
 		mBufferPtr = 0;
 	}
 
+	// Room for a few more blocks (StartNewBlock assumes one block never
+	// needs more than 32 KB)
+	bool	IsNearlyFull() const
+	{
+		return mBufferPtr + 128 * 1024 > mBufferSize;
+	}
+
 	u8 *	StartNewBlock()
 	{
 		// Round up to 64 byte boundary - i.e. one cache line
@@ -116,6 +123,7 @@ public:
 
 	virtual std::shared_ptr<CCodeGenerator>	StartNewBlock();
 	virtual u32					FinaliseCurrentBlock();
+	virtual bool				IsNearlyFull() const	{ return mPrimaryBuffer.IsNearlyFull() || mSecondaryBuffer.IsNearlyFull(); }
 
 private:
 

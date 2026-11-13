@@ -36,6 +36,11 @@ public:
 	virtual	std::shared_ptr<CCodeGenerator>		StartNewBlock() = 0;
 	virtual	u32						FinaliseCurrentBlock() = 0;
 
+	// True when the code buffers are close to full and the fragment cache
+	// must be cleared before more code is generated. Managers that grow or
+	// check their buffers themselves can leave this false.
+	virtual bool					IsNearlyFull() const { return false; }
+
 public:
 	static	std::shared_ptr<CCodeBufferManager>	Create();
 };

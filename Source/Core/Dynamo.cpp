@@ -38,6 +38,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "DynaRec/DynaRecProfile.h"
 #include "DynaRec/Fragment.h"
 #include "DynaRec/FragmentCache.h"
+#include "DynaRec/CodeBufferManager.h"
 #include "DynaRec/TraceRecorder.h"
 #include "OSHLE/patch.h"				// GetCorrectOp
 #include "Ultra/ultra_R4300.h"
@@ -628,7 +629,15 @@ void CPU_HandleDynaRecOnBranch( bool backwards, bool trace_already_enabled )
 						gResetFragmentCache = false;
 					}
 
-					if( gFragmentCache.GetCacheSize() > gMaxFragmentCacheSize)
+					// The PSP code buffers have a fixed size and nothing stops a
+					// block from being written past their end, so also clear when
+					// they are nearly full. The fragment count alone did not
+					// protect them (about 350 bytes per fragment, so 9216
+					// fragments need more than the 3 MB buffer); it used to be
+					// enough only because writes over compiled code cleared the
+					// whole cache often. Clearing at a trace start covers all
+					// generated code: every new fragment starts with a trace here.
+					if( gFragmentCache.GetCacheSize() > gMaxFragmentCacheSize || gFragmentCache.GetCodeBufferManager()->IsNearlyFull() )
 					{
 						DAEDALUS_PERF_STAT( kStatFlushSize );
 						gFragmentCache.Clear();
