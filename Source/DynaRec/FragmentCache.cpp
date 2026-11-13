@@ -197,6 +197,18 @@ void CFragmentCache::InsertFragment( CFragment * p_fragment )
 	mpCacheHashTable[ix].addr = fragment_address;
 	mpCacheHashTable[ix].ptr = reinterpret_cast< uintptr_t >( p_fragment );
 
+	// The last lookup (LookupFragmentQ's one entry cache) may have cached "no
+	// fragment" for this address: the dispatcher looks an address up, finds
+	// nothing and starts the trace that becomes this fragment. Without this,
+	// the fragment's own exits back to its entry (and any other lookup of it
+	// until the cache moves on) still saw "no fragment" and were left
+	// unlinked, so every pass through such a loop went back to the
+	// dispatcher.
+	if( mCachedFragmentAddress == fragment_address )
+	{
+		mpCachedFragment = p_fragment;
+	}
+
 	// Process any jumps for this before inserting new ones
 	JumpMap::iterator	jump_it( mJumpMap.find( fragment_address ) );
 	if( jump_it != mJumpMap.end() )
