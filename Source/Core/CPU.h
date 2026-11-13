@@ -169,6 +169,7 @@ u32		CPU_GetVideoInterruptEventCount();
 void	CPU_SetVideoInterruptEventCount( u32 count );
 void	CPU_DynarecEnable();
 void	 CPU_InvalidateICacheRange( u32 address, u32 length );
+void	 CPU_InvalidateICacheIndexed( u32 address );	// CACHE Index Invalidate: the address only selects a cache line
 void	 CPU_InvalidateICache();
 void	CPU_SetCompare(u32 value);
 #ifdef DAEDALUS_BREAKPOINTS_ENABLED

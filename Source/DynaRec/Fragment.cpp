@@ -71,6 +71,39 @@ namespace
 }
 
 //*************************************************************************************
+//	Code pages: the 4 KB pages (numbered from 0x80000000, first 8 MB) that hold
+//	the given instructions, plus the range [entry, entry + length] that was
+//	used before, so a fragment is never treated as covering less than it used to.
+//*************************************************************************************
+static const u32 kNumCodePages = ( 8 * 1024 * 1024 ) >> 12;
+
+static void AddCodePage( std::vector< u16 > & pages, u32 address )
+{
+	u32 index = ( address - 0x80000000 ) >> 12;
+	if( index < kNumCodePages )
+	{
+		pages.push_back( u16( index ) );
+	}
+}
+
+static void AddCodeRange( std::vector< u16 > & pages, u32 address, u32 length )
+{
+	u32 first = ( address - 0x80000000 ) >> 12;
+	u32 last = ( address + length - 0x80000000 ) >> 12;
+	for( u32 i = first; i <= last && i < kNumCodePages; ++i )
+	{
+		pages.push_back( u16( i ) );
+	}
+}
+
+static void FinishCodePages( std::vector< u16 > & pages )
+{
+	std::sort( pages.begin(), pages.end() );
+	pages.erase( std::unique( pages.begin(), pages.end() ), pages.end() );
+	pages.shrink_to_fit();
+}
+
+//*************************************************************************************
 //
 //*************************************************************************************
 CFragment::CFragment( std::shared_ptr<CCodeBufferManager> p_manager,
@@ -99,6 +132,14 @@ CFragment::CFragment( std::shared_ptr<CCodeBufferManager> p_manager,
 #ifdef FRAGMENT_RETAIN_ADDITIONAL_INFO
 	mRegisterUsage = register_usage;
 #endif
+	mIsPatchFragment = false;
+	mIsDead = false;
+	AddCodeRange( mCodePages, entry_address, mInputLength );
+	for( const STraceEntry & e : trace )
+	{
+		AddCodePage( mCodePages, e.Address );
+	}
+	FinishCodePages( mCodePages );
 
 	Assemble( p_manager, exit_address, trace, branch_details, register_usage );
 }
@@ -124,6 +165,11 @@ CFragment::CFragment(std::shared_ptr<CCodeBufferManager> p_manager, u32 entry_ad
 	,	mpCache( nullptr )
 #endif
 {
+	mIsPatchFragment = true;
+	mIsDead = false;
+	AddCodeRange( mCodePages, entry_address, mInputLength );
+	FinishCodePages( mCodePages );
+
 	Assemble(p_manager, CCodeLabel(function_Ptr));
 }
 #endif
@@ -133,6 +179,19 @@ CFragment::CFragment(std::shared_ptr<CCodeBufferManager> p_manager, u32 entry_ad
 CFragment::~CFragment()
 {
 	delete mpIndirectExitMap;
+}
+
+//*************************************************************************************
+//	Forget the remembered target of this fragment's indirect exit (it may be
+//	a fragment that was just removed from the cache).
+//*************************************************************************************
+void	CFragment::ResetIndirectExitCache()
+{
+	if( mpIndirectExitMap != nullptr )
+	{
+		mpIndirectExitMap->mLastAddress = 0;
+		mpIndirectExitMap->mLastTarget = nullptr;
+	}
 }
 
 //*************************************************************************************

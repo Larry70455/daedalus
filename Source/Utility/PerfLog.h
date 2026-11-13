@@ -49,6 +49,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #ifdef DAEDALUS_PERF_LOG
 
+#include <vector>
+
 namespace PerfLog
 {
 	// Keep in sync with kCategoryNames in PerfLog.cpp
@@ -92,7 +94,9 @@ namespace PerfLog
 		kStatFragmentCreated,
 		kStatAudioUnderrun,
 		kStatInvalChecks,		// osInvalICache calls that did not flush and were verified
-		kStatStaleOps,			// compiled instructions that no longer match memory after such a call (must be 0)		// the audio output asked for samples and the buffer was empty (heard as a crackle)
+		kStatStaleOps,			// compiled instructions that no longer match memory after such a call (must be 0)
+		kStatPartialInvalidate,	// a write overlapped compiled code and only the affected fragments were dropped
+		kStatFragmentsDropped,	// fragments dropped that way
 		kNumStats
 	};
 	extern u32 gStats[ kNumStats ];
@@ -102,6 +106,7 @@ namespace PerfLog
 	// CountStaleCompiledOps compares them all with current memory.
 	void	NoteCompiledOp( u32 address, u32 op );
 	void	ClearCompiledOps();
+	void	ForgetCompiledOpsInPages( const std::vector< u16 > & pages );	// 4 KB pages numbered from 0x80000000
 	u32		CountStaleCompiledOps();	// Counts one interpreted op and builds the hot address table
 	extern u32 gInterpretedOps;
 	extern u32 gFallbackOps;

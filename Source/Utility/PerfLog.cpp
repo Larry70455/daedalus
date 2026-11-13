@@ -302,6 +302,8 @@ static void WriteInterpretedHot()
 			 gStats[ kStatFlushICache ], gStats[ kStatFlushOverlap ], gStats[ kStatFlushSize ], gStats[ kStatFlushHotMap ] );
 	fprintf( fh, "# dynarec events: traces started %u, aborted %u, fragments compiled %u\n",
 			 gStats[ kStatTraceStarted ], gStats[ kStatTraceAborted ], gStats[ kStatFragmentCreated ] );
+	fprintf( fh, "# dynarec events: writes over compiled code handled by dropping only the affected fragments %u (%u fragments dropped)\n",
+			 gStats[ kStatPartialInvalidate ], gStats[ kStatFragmentsDropped ] );
 	fprintf( fh, "# stale code check: %u osInvalICache calls verified without a flush, %u stale compiled instructions found (must be 0)\n", gStats[ kStatInvalChecks ], gStats[ kStatStaleOps ] );
 	fprintf( fh, "# audio underruns (output ran dry, heard as crackle): %u\n", gStats[ kStatAudioUnderrun ] );
 	fprintf( fh, "# Hottest 256 byte blocks (a function or loop usually lives in one or two):\n" );
@@ -324,6 +326,16 @@ void NoteCompiledOp( u32 address, u32 op )
 void ClearCompiledOps()
 {
 	gCompiledOps.clear();
+}
+
+void ForgetCompiledOpsInPages( const std::vector< u16 > & pages )
+{
+	gCompiledOps.erase( std::remove_if( gCompiledOps.begin(), gCompiledOps.end(),
+		[ &pages ]( const std::pair< u32, u32 > & e )
+		{
+			u32 page = ( e.first - 0x80000000 ) >> 12;
+			return std::binary_search( pages.begin(), pages.end(), u16( page ) ) && page < 0x10000;
+		} ), gCompiledOps.end() );
 }
 
 u32 CountStaleCompiledOps()

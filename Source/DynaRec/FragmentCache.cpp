@@ -52,6 +52,9 @@ CFragmentCache::CFragmentCache()
 ,	mpCachedFragment( nullptr )
 {
 	std::memset( mpCacheHashTable.data(), 0, mpCacheHashTable.size() * sizeof(mpCacheHashTable[0]));
+#if DAEDALUS_SELECTIVE_INVALIDATE
+	mPageRefs.fill( 0 );
+#endif
 
 	mFragments.reserve( 2000 );
 
@@ -180,9 +183,18 @@ CFragment * CFragmentCache::LookupFragmentQ( u32 address ) const
 //*************************************************************************************
 void CFragmentCache::InsertFragment( CFragment * p_fragment )
 {
+	CFragment * const	p_new_fragment( p_fragment );	// p_fragment is shadowed below
+	(void)p_new_fragment;
 	u32		fragment_address( p_fragment->GetEntryAddress() );
 
+#if DAEDALUS_SELECTIVE_INVALIDATE
+	for( u16 page : p_fragment->GetCodePages() )
+	{
+		mPageRefs[ page ]++;
+	}
+#else
 	mCacheCoverage.ExtendCoverage( fragment_address, p_fragment->GetInputLength() );
+#endif
 
 	SFragmentEntry				entry( fragment_address, nullptr );
 	FragmentVec::iterator		it( std::lower_bound( mFragments.begin(), mFragments.end(), entry ) );
@@ -217,7 +229,14 @@ void CFragmentCache::InsertFragment( CFragment * p_fragment )
 		for( JumpList::const_iterator it = jumps.begin(); it != jumps.end(); ++it )
 		{
 			//DBGConsole_Msg( 0, "Inserting [R%08x], patching jump at %08x ", address, (*it) );
+#if DAEDALUS_SELECTIVE_INVALIDATE
+			if( !it->Source->IsDead() )
+			{
+				LinkJump( it->Jump, it->Source, p_fragment );
+			}
+#else
 			PatchJumpLongAndFlush( (*it), p_fragment->GetEntryTarget() );
+#endif
 		}
 
 		// All patched - clear
@@ -242,7 +261,11 @@ void CFragmentCache::InsertFragment( CFragment * p_fragment )
 #endif
 		if( p_fragment != nullptr )
 		{
+#if DAEDALUS_SELECTIVE_INVALIDATE
+			LinkJump( jump, p_new_fragment, p_fragment );
+#else
 			PatchJumpLongAndFlush( jump, p_fragment->GetEntryTarget() );
+#endif
 
 	#ifdef DAEDALUS_ENABLE_ASSERTS
 			DAEDALUS_ASSERT( mJumpMap.find( target_address ) == mJumpMap.end(), "Jump map still contains an entry for this" );
@@ -251,7 +274,11 @@ void CFragmentCache::InsertFragment( CFragment * p_fragment )
 		else if( target_address != u32(~0) )
 		{
 			// Store the address for later processing
+#if DAEDALUS_SELECTIVE_INVALIDATE
+			mJumpMap[ target_address ].push_back( SPendingJump{ jump, p_new_fragment } );
+#else
 			mJumpMap[ target_address ].push_back( jump );
+#endif
 		}
 	}
 
@@ -301,6 +328,15 @@ void CFragmentCache::Clear()
 	}
 
 	mFragments.erase( mFragments.begin(), mFragments.end() );
+#if DAEDALUS_SELECTIVE_INVALIDATE
+	for( CFragment * p_dead : mDeadFragments )
+	{
+		delete p_dead;
+	}
+	mDeadFragments.clear();
+	mPendingInvalidations.clear();
+	mPageRefs.fill( 0 );
+#endif
 	mMemoryUsage = 0;
 	mInputLength = 0;
 	mOutputLength = 0;
@@ -319,8 +355,155 @@ void CFragmentCache::Clear()
 //*************************************************************************************
 bool CFragmentCache::ShouldInvalidateOnWrite( u32 address, u32 length ) const
 {
+#if DAEDALUS_SELECTIVE_INVALIDATE
+	// Same page numbering and range as CFragmentCacheCoverage
+	const u32 num_pages = mPageRefs.size();
+	u32 first = ( address - 0x80000000 ) >> 12;
+	u32 last = ( address + length - 0x80000000 ) >> 12;
+	for( u32 i = first; i <= last && i < num_pages; ++i )
+	{
+		if( mPageRefs[ i ] != 0 )
+			return true;
+	}
+	return false;
+#else
 	return mCacheCoverage.IsCovered( address, length );
+#endif
 }
+
+#if DAEDALUS_SELECTIVE_INVALIDATE
+//*************************************************************************************
+//	Patch a jump in source to enter target, remembering how to undo it
+//*************************************************************************************
+void CFragmentCache::LinkJump( CJumpLocation jump, CFragment * source, CFragment * target )
+{
+	u32 original_op = ReadJumpWord( jump );
+	if( PatchJumpLongAndFlush( jump, target->GetEntryTarget() ) )
+	{
+		target->GetIncomingLinks().push_back( SFragmentLink{ jump, original_op, source } );
+	}
+}
+
+void CFragmentCache::QueueInvalidation( u32 address, u32 length )
+{
+	mPendingInvalidations.emplace_back( address, length );
+}
+
+//*************************************************************************************
+//
+//*************************************************************************************
+bool CFragmentCache::ProcessPendingInvalidations( std::vector< u32 > & dropped_entries, std::vector< std::pair< u32, u32 > > & ranges )
+{
+	const u32 num_pages = mPageRefs.size();
+
+	// Pages written to
+	std::vector< bool > written( num_pages, false );
+	for( const auto & r : mPendingInvalidations )
+	{
+		u32 first = ( r.first - 0x80000000 ) >> 12;
+		u32 last = ( r.first + r.second - 0x80000000 ) >> 12;
+		for( u32 i = first; i <= last && i < num_pages; ++i )
+		{
+			written[ i ] = true;
+		}
+	}
+	ranges.insert( ranges.end(), mPendingInvalidations.begin(), mPendingInvalidations.end() );
+	mPendingInvalidations.clear();
+
+	// Fragments compiled from any of those pages
+	std::vector< CFragment * > victims;
+	for( const SFragmentEntry & e : mFragments )
+	{
+		for( u16 page : e.Fragment->GetCodePages() )
+		{
+			if( written[ page ] )
+			{
+				if( e.Fragment->IsPatchFragment() )
+				{
+					return false;	// keep the old behaviour for OS patches: full Clear
+				}
+				victims.push_back( e.Fragment );
+				break;
+			}
+		}
+	}
+	if( victims.empty() )
+	{
+		return true;
+	}
+
+	for( CFragment * p_victim : victims )
+	{
+		p_victim->SetDead();
+	}
+
+	for( CFragment * p_victim : victims )
+	{
+		u32 entry = p_victim->GetEntryAddress();
+		dropped_entries.push_back( entry );
+
+		for( u16 page : p_victim->GetCodePages() )
+		{
+			mPageRefs[ page ]--;
+		}
+
+		// Undo every link into this fragment, and queue the live ones to be
+		// linked again when the code at this address is compiled again
+		for( const SFragmentLink & link : p_victim->GetIncomingLinks() )
+		{
+			if( !link.Source->IsDead() )
+			{
+				RestoreJumpWord( link.Jump, link.OriginalOp );
+				mJumpMap[ entry ].push_back( SPendingJump{ link.Jump, link.Source } );
+			}
+		}
+		p_victim->GetIncomingLinks().clear();
+
+		// Forget cached lookups of it
+		u32 ix = MakeHashIdx( entry );
+		if( mpCacheHashTable[ ix ].addr == entry )
+		{
+			mpCacheHashTable[ ix ].addr = 0;
+			mpCacheHashTable[ ix ].ptr = 0;
+		}
+
+		mMemoryUsage -= p_victim->GetMemoryUsage();
+		mInputLength -= p_victim->GetInputLength();
+		mOutputLength -= p_victim->GetOutputLength();
+
+#ifdef DAEDALUS_PERF_LOG
+		PerfLog::ForgetCompiledOpsInPages( p_victim->GetCodePages() );
+#endif
+		mDeadFragments.push_back( p_victim );
+	}
+
+	// Remove them from the sorted list
+	mFragments.erase( std::remove_if( mFragments.begin(), mFragments.end(),
+		[]( const SFragmentEntry & e ) { return e.Fragment->IsDead(); } ), mFragments.end() );
+
+	// Pending links that come from dropped fragments will never be needed
+	for( JumpMap::iterator it = mJumpMap.begin(); it != mJumpMap.end(); )
+	{
+		JumpList & list = it->second;
+		list.erase( std::remove_if( list.begin(), list.end(),
+			[]( const SPendingJump & j ) { return j.Source->IsDead(); } ), list.end() );
+		if( list.empty() )
+			it = mJumpMap.erase( it );
+		else
+			++it;
+	}
+
+	// Indirect exits may remember a dropped fragment as their last target
+	for( const SFragmentEntry & e : mFragments )
+	{
+		e.Fragment->ResetIndirectExitCache();
+	}
+
+	mCachedFragmentAddress = 0;
+	mpCachedFragment = nullptr;
+	return true;
+}
+#endif
 
 
 

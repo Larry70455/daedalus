@@ -103,6 +103,21 @@ bool	PatchJumpLongAndFlush( CJumpLocation jump, CCodeLabel target )
 }
 
 
+u32		ReadJumpWord( CJumpLocation jump )
+{
+	// Uncached, like the writes in PatchJumpLong
+	return *reinterpret_cast< const u32 * >( jump.GetWritableU8P() );
+}
+
+void	RestoreJumpWord( CJumpLocation jump, u32 word )
+{
+	*reinterpret_cast< u32 * >( jump.GetWritableU8P() ) = word;
+
+	const u8 * p_lower( RoundPointerDown( jump.GetTargetU8P(), 64 ) );
+	const u8 * p_upper( RoundPointerUp( jump.GetTargetU8P() + 8, 64 ) );
+	_DaedalusICacheInvalidate( p_lower, p_upper - p_lower );
+}
+
 //	Replace a branch instruction with an unconditional jump
 void		ReplaceBranchWithJump( CJumpLocation branch, CCodeLabel target )
 {

@@ -2784,11 +2784,19 @@ inline void	CCodeGeneratorPSP::GenerateCACHE( EN64Reg base, s16 offset, u32 cach
 	//if(!(cache_op & 0x1F))
 	if(cache == 0 && (action == 0 || action == 4))
 	{
+		// Index Invalidate (0) and Hit Invalidate (4), see R4300_CACHE
 		FlushAllRegisters(mRegisterCache, true);
 		LoadRegister(PspReg_A0, base, 0);
 		ADDI(PspReg_A0, PspReg_A0, offset);
-		JAL( CCodeLabel( reinterpret_cast< const void * >( CPU_InvalidateICacheRange ) ), false );
-		ORI(PspReg_A1, PspReg_R0, 0x20);
+		if( action == 0 )
+		{
+			JAL( CCodeLabel( reinterpret_cast< const void * >( CPU_InvalidateICacheIndexed ) ), true );
+		}
+		else
+		{
+			JAL( CCodeLabel( reinterpret_cast< const void * >( CPU_InvalidateICacheRange ) ), false );
+			ORI(PspReg_A1, PspReg_R0, 0x20);
+		}
 	}
 	//else
 	//{

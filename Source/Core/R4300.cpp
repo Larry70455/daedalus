@@ -1165,10 +1165,13 @@ static void  R4300_CACHE( R4300_CALL_SIGNATURE )
 	u32 dwCache = cache_op & 0x3;
 	u32 dwAction = (cache_op >> 2) & 0x7;
 
-	if(dwCache == 0 && (dwAction == 0 || dwAction == 4))
+	if(dwCache == 0 && dwAction == 0)
 	{
-		//DBGConsole_Msg( 0, "Cache invalidate - forcibly dumping dynarec contents" );
-		CPU_InvalidateICacheRange(address, 0x20);
+		CPU_InvalidateICacheIndexed(address);		// Index Invalidate: whole cache line index, see Dynamo.cpp
+	}
+	else if(dwCache == 0 && dwAction == 4)
+	{
+		CPU_InvalidateICacheRange(address, 0x20);	// Hit Invalidate: this address
 	}
 	//DBGConsole_Msg(0, "CACHE %s/%d, 0x%08x", gCacheNames[dwCache], dwAction, address);
 #endif

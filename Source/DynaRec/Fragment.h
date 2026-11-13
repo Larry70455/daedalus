@@ -57,6 +57,18 @@ struct SFragmentPatchDetails
 };
 using FragmentPatchList = std::vector<SFragmentPatchDetails>;
 
+class CFragment;
+
+// A patched jump from one fragment into another (see CFragmentCache).
+// OriginalOp is the jump instruction as generated, before it was patched to
+// point at the target fragment, so the link can be undone.
+struct SFragmentLink
+{
+	CJumpLocation	Jump;
+	u32				OriginalOp;
+	CFragment *		Source;
+};
+
 //*************************************************************************************
 //
 //*************************************************************************************
@@ -87,6 +99,16 @@ public:
 		u32			GetOutputLength() const						{ return mOutputLength; }
 
 		void		SetCache( const CFragmentCache * p_cache );
+
+		// Pages (4 KB, numbered from 0x80000000) of N64 memory this fragment
+		// was compiled from, sorted, no duplicates. Used to drop only the
+		// fragments that a write to code memory makes stale.
+		const std::vector< u16 > &	GetCodePages() const		{ return mCodePages; }
+		bool		IsPatchFragment() const						{ return mIsPatchFragment; }
+		bool		IsDead() const								{ return mIsDead; }
+		void		SetDead()									{ mIsDead = true; }
+		std::vector< SFragmentLink > &	GetIncomingLinks()		{ return mIncomingLinks; }
+		void		ResetIndirectExitCache();
 
 		const FragmentPatchList &	GetPatchList() const		{ return mPatchList; }
 		void		DiscardPatchList()							{ mPatchList.clear(); }
@@ -119,6 +141,11 @@ private:
 		u32								mFragmentFunctionLength;
 
 		CIndirectExitMap *				mpIndirectExitMap;
+
+		std::vector< u16 >				mCodePages;
+		std::vector< SFragmentLink >	mIncomingLinks;		// jumps from other fragments patched to enter this one
+		bool							mIsPatchFragment;
+		bool							mIsDead;			// removed from the cache, kept alive until the next Clear
 
 #ifdef FRAGMENT_RETAIN_ADDITIONAL_INFO
 		u32								mHitCount;

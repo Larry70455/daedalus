@@ -121,10 +121,69 @@ void  CPU_InvalidateICacheRange( u32 address, u32 length )
 #ifndef DAEDALUS_SILENT
 		printf( "Write to %08x (%d bytes) overlaps fragment cache entries\n", address, length );
 #endif
+#if DAEDALUS_SELECTIVE_INVALIDATE
+		// Dropped at the next safe point (CPU_HandleDynaRecOnBranch): only the
+		// fragments compiled from the pages written to
+		gFragmentCache.QueueInvalidation( address, length );
+#else
 		DAEDALUS_PERF_STAT( kStatFlushOverlap );	// No-op unless DAEDALUS_PERF_LOG
+		CPU_ResetFragmentCache();
+#endif
+	}
+}
+
+//*****************************************************************************
+//	CACHE Index Invalidate (instruction cache). The address only selects a
+//	cache line by index, so it says nothing about which code changed: games
+//	loop it over the whole cache to forget all of it after changing code with
+//	normal stores (e.g. relocating an overlay). Keep the old behaviour, a full
+//	flush, even with selective invalidation (Pokemon Stadium 2 with OS patches
+//	off ran stale code otherwise).
+//*****************************************************************************
+void  CPU_InvalidateICacheIndexed( u32 address )
+{
+	if( gFragmentCache.ShouldInvalidateOnWrite( address, 0x20 ) )
+	{
+		DAEDALUS_PERF_STAT( kStatFlushICache );	// No-op unless DAEDALUS_PERF_LOG
 		CPU_ResetFragmentCache();
 	}
 }
+
+#if DAEDALUS_SELECTIVE_INVALIDATE
+//*****************************************************************************
+//	Drop the fragments made stale by writes queued in CPU_InvalidateICacheRange.
+//	Called from the dispatcher, where no fragment is running.
+//*****************************************************************************
+static void CPU_ProcessPendingInvalidations()
+{
+	std::vector< u32 > dropped;
+	std::vector< std::pair< u32, u32 > > ranges;
+	if( !gFragmentCache.ProcessPendingInvalidations( dropped, ranges ) )
+	{
+		DAEDALUS_PERF_STAT( kStatFlushOverlap );	// No-op unless DAEDALUS_PERF_LOG
+		CPU_ResetFragmentCache();
+		return;
+	}
+	if( dropped.empty() )
+	{
+		return;
+	}
+#ifdef DAEDALUS_PERF_LOG
+	PerfLog::gStats[ PerfLog::kStatPartialInvalidate ]++;
+	PerfLog::gStats[ PerfLog::kStatFragmentsDropped ] += dropped.size();
+#endif
+	// The code at these addresses must be able to become a trace again: a hot
+	// count already at the threshold would never start one
+	for( u32 entry : dropped )
+	{
+		gHotTraceCountMap.erase( entry );
+	}
+	for( const auto & r : ranges )
+	{
+		gHotTraceCountMap.erase( gHotTraceCountMap.lower_bound( r.first ), gHotTraceCountMap.lower_bound( r.first + r.second ) );
+	}
+}
+#endif
 
 
 //*****************************************************************************
@@ -482,6 +541,20 @@ void CPU_HandleDynaRecOnBranch( bool backwards, bool trace_already_enabled )
 
 	while( gCPUState.GetStuffToDo() == 0 && gCPUState.Delay == NO_DELAY )
 	{
+#if DAEDALUS_SELECTIVE_INVALIDATE
+		if( gFragmentCache.HasPendingInvalidations() )
+		{
+			// A trace being recorded may contain code that was just
+			// overwritten, and fragments must not run while stale: drop the
+			// trace and the stale fragments now
+			if( gTraceRecorder.IsTraceActive() )
+			{
+				gTraceRecorder.AbortTrace();
+				change_core = true;
+			}
+			CPU_ProcessPendingInvalidations();
+		}
+#endif
 		#ifdef DAEDALUS_ENABLE_DYNAREC_PROFILE
 		DAEDALUS_ASSERT( gCPUState.Delay == NO_DELAY, "Why are we entering with a delay slot active?" );
 		u32			entry_count( gCPUState.CPUControl[C0_COUNT]._u32 ); // Just used DYNAREC_PROFILE_ENTEREXIT
@@ -660,5 +733,6 @@ void Dynamo_SelectCore()
 void CPU_ResetFragmentCache() {}
 void Dynamo_Reset() {}
 void  CPU_InvalidateICacheRange( u32 address [[maybe_unused]], u32 length [[maybe_unused]] ) {}
+void  CPU_InvalidateICacheIndexed( u32 address [[maybe_unused]] ) {}
 
 #endif //DAEDALUS_ENABLE_DYNAREC

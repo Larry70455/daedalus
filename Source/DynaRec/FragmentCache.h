@@ -21,7 +21,25 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define DYNAREC_FRAGMENTCACHE_H_
 
 #include "Base/Types.h"
+#include "DynaRec/AssemblyUtils.h"
 
+
+// Selective invalidation: when the game writes over memory that holds
+// compiled code, drop only the fragments compiled from the pages written to,
+// instead of the whole cache. Every patched link into a dropped fragment is
+// restored to its unlinked form (the original jump word) and queued to be
+// linked again when the code is recompiled. Dropped fragments are kept (not
+// deleted, their code memory not reused) until the next full Clear, because
+// a fragment can be running when the write happens. Patching works on single
+// 32 bit instructions, so this is only enabled for the MIPS (PSP) generator;
+// other platforms keep the full flush. Set to 0 to get the old behaviour.
+#ifndef DAEDALUS_SELECTIVE_INVALIDATE
+#ifdef DAEDALUS_PSP
+#define DAEDALUS_SELECTIVE_INVALIDATE 1
+#else
+#define DAEDALUS_SELECTIVE_INVALIDATE 0
+#endif
+#endif
 
 class	CFragment;
 class	CJumpLocation;
@@ -81,7 +99,22 @@ public:
 	CFragment *				LookupFragmentQ( u32 address ) const;
 	void					InsertFragment( CFragment * p_fragment );
 
+#if DAEDALUS_SELECTIVE_INVALIDATE
+	// Dropped fragments still use code memory until Clear, so they count
+	u32						GetCacheSize() const					{ return mFragments.size() + mDeadFragments.size(); }
+
+	// Remember a write over compiled code (see DAEDALUS_SELECTIVE_INVALIDATE)
+	void					QueueInvalidation( u32 address, u32 length );
+	bool					HasPendingInvalidations() const			{ return !mPendingInvalidations.empty(); }
+	// Drop the fragments the queued writes made stale. Must not be called
+	// while a fragment is running or a trace is being recorded. Adds the
+	// entry addresses of the dropped fragments to dropped_entries and the
+	// written ranges to ranges. Returns false if a full Clear is needed
+	// instead (an OS patch fragment was hit); nothing is dropped then.
+	bool					ProcessPendingInvalidations( std::vector< u32 > & dropped_entries, std::vector< std::pair< u32, u32 > > & ranges );
+#else
 	u32						GetCacheSize() const					{ return mFragments.size(); }
+#endif
 	void					Clear();
 
 #ifdef DAEDALUS_DEBUG_DYNAREC
@@ -118,7 +151,21 @@ private:
 	u32						mMemoryUsage;
 	u32						mInputLength;
 	u32						mOutputLength;
+#if DAEDALUS_SELECTIVE_INVALIDATE
+	struct SPendingJump
+	{
+		CJumpLocation	Jump;
+		CFragment *		Source;
+	};
+	using JumpList = std::vector< SPendingJump >;
+	void					LinkJump( CJumpLocation jump, CFragment * source, CFragment * target );
+
+	std::vector< CFragment * >					mDeadFragments;
+	std::vector< std::pair< u32, u32 > >		mPendingInvalidations;
+	std::array< u16, ((8*1024*1024) >> 12) >		mPageRefs;	// live fragments using each 4 KB page
+#else
 	using JumpList = std::vector< CJumpLocation >;
+#endif
 	using JumpMap = std::map< u32, JumpList >;
 	JumpMap					mJumpMap;
 

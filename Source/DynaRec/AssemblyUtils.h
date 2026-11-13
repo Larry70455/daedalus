@@ -82,6 +82,12 @@ namespace AssemblyUtils
 	bool		PatchJumpLong( CJumpLocation jump, CCodeLabel target );
 	bool		PatchJumpLongAndFlush( CJumpLocation jump, CCodeLabel target );
 	void		ReplaceBranchWithJump( CJumpLocation branch, CCodeLabel target );
+
+	// The single instruction word at a jump location, and putting one back
+	// (with the instruction cache flushed). Used to undo a patched link.
+	// Only implemented where jumps are patched as one 32 bit word (MIPS).
+	u32			ReadJumpWord( CJumpLocation jump );
+	void		RestoreJumpWord( CJumpLocation jump, u32 word );
 }
 
 #endif // DYNAREC_ASSEMBLYUTILS_H_
