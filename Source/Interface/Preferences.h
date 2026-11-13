@@ -41,6 +41,11 @@ class CPreferences : public CSingleton<CPreferences>
 };
 
 const char* Preferences_GetTextureHashFrequencyDescription(ETextureHashFrequency thf);
+
+// The saved preferences for this ROM if there are any (returns true). Otherwise
+// the defaults (returns false), adjusted by the game's entry in roms.ini (for
+// example TextureUpdateCheck=1 for games that show stale textures without it).
+bool Preferences_GetRomPreferencesOrDefaults(const RomID& id, SRomPreferences* preferences);
 const char* Preferences_GetFrameskipDescription(EFrameskipValue value);
 
 #endif  // UTILITY_PREFERENCES_H_

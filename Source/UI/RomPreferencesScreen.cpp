@@ -225,7 +225,7 @@ IRomPreferencesScreen::IRomPreferencesScreen( CUIContext * p_context, const RomI
 ,	mRomName( "?" )
 ,	mIsFinished( false )
 {
-	CPreferences::Get()->GetRomPreferences( mRomID, &mRomPreferences );
+	Preferences_GetRomPreferencesOrDefaults( mRomID, &mRomPreferences );
 
 	RomSettings			settings;
 	if ( CRomSettingsDB::Get()->GetSettings( rom_id, &settings ) )

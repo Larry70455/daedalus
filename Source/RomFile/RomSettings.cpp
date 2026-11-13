@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 
 #include <cstring> 
+#include <cstdlib>
 
 #include <set>
 #include <map>
@@ -303,6 +304,10 @@ bool IRomSettingsDB::OpenSettingsFile( const std::filesystem::path &filename )
 		{
 			settings.FogEnabled = p_property->GetBooleanValue( false );
 		}
+		if( p_section->FindProperty( "TextureUpdateCheck", &p_property ) )
+		{
+			settings.TextureUpdateCheck = (u32)atoi( p_property->GetValue() );
+		}
 		if( p_section->FindProperty( "MemoryAccessOptimisation", &p_property ) )
 		{
 			settings.MemoryAccessOptimisation = p_property->GetBooleanValue( false );
@@ -419,6 +424,7 @@ void IRomSettingsDB::OutputSectionDetails( const RomID & id, const RomSettings &
     if (settings.AudioRateMatch)               out << "AudioRateMatch=yes\n";
     if (settings.VideoRateMatch)               out << "VideoRateMatch=yes\n";
     if (settings.FogEnabled)                   out << "FogEnabled=yes\n";
+    if (settings.TextureUpdateCheck != 0)      out << "TextureUpdateCheck=" << std::dec << settings.TextureUpdateCheck << "\n";
     if (settings.MemoryAccessOptimisation)     out << "MemoryAccessOptimisation=yes\n";
     if (settings.CheatsEnabled)                out << "CheatsEnabled=yes\n";
 
@@ -483,6 +489,7 @@ RomSettings::RomSettings()
 ,	FogEnabled( false )
 ,   MemoryAccessOptimisation( false )
 ,   CheatsEnabled( false )
+,	TextureUpdateCheck( 0 )
 {
 }
 
@@ -511,4 +518,5 @@ void	RomSettings::Reset()
 	FogEnabled = false;
 	CheatsEnabled = false;
 	MemoryAccessOptimisation = false;
+	TextureUpdateCheck = 0;
 }

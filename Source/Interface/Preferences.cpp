@@ -535,6 +535,25 @@ static const char * const gTextureHashFreqeuncyDescriptions[] =
 	"Every 32 Frames",	//THF_EVERY_32,
 };
 
+bool Preferences_GetRomPreferencesOrDefaults( const RomID & id, SRomPreferences * preferences )
+{
+	if( CPreferences::Get()->GetRomPreferences( id, preferences ) )
+	{
+		return true;
+	}
+
+	preferences->Reset();
+
+	// Per-game defaults from roms.ini. Only used while the user has not saved
+	// their own settings for this game.
+	RomSettings settings;
+	if( CRomSettingsDB::Get()->GetSettings( id, &settings ) && settings.TextureUpdateCheck != 0 )
+	{
+		preferences->CheckTextureHashFrequency = GetTextureHashFrequencyFromFrames( settings.TextureUpdateCheck );
+	}
+	return false;
+}
+
 static u32 GetTexureHashFrequencyAsFrames( ETextureHashFrequency thf )
 {
 	if(thf >= 0 && thf < NUM_THF)

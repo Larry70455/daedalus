@@ -71,6 +71,7 @@ struct RomSettings
 	bool				FogEnabled;
 	bool                MemoryAccessOptimisation;
 	bool				CheatsEnabled;
+	u32					TextureUpdateCheck;	// roms.ini "TextureUpdateCheck=N": default texture update check (every N frames) for this game; 0 = use the normal default
 
 	RomSettings();
 
