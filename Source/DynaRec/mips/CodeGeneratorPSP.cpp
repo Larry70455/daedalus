@@ -614,6 +614,12 @@ EPspReg	CCodeGeneratorPSP::GetRegisterNoLoad( EN64Reg n64_reg, u32 lo_hi_idx, EP
 #define DAEDALUS_LAZY_SIGN_EXTEND 1
 #endif
 
+// ORI/XORI with rt != rs give rt the sign extension of the result as its high
+// half (see GenerateORI). Set to 0 to leave rt's old high half (old behaviour).
+#ifndef DAEDALUS_ORI_SIGN_EXTEND_HI
+#define DAEDALUS_ORI_SIGN_EXTEND_HI 1
+#endif
+
 // Fragment exits update the cycle counter inline instead of calling
 // _DirectExitCheckNoDelay (see GenerateExitCode)
 #ifndef DAEDALUS_INLINE_EXIT_CHECK
@@ -3794,7 +3800,22 @@ inline void	CCodeGeneratorPSP::GenerateORI( EN64Reg rt, EN64Reg rs, u16 immediat
 		EPspReg dst_reg( GetRegisterNoLoadLo( rt, PspReg_V0 ) );
 		EPspReg	src_reg( GetRegisterAndLoadLo( rs, PspReg_A0 ) );
 		ORI( dst_reg, src_reg, immediate );
+#if DAEDALUS_ORI_SIGN_EXTEND_HI
+		// rt's high half is rs's high half. For 32 bit values that is the sign
+		// of rs, which ORI does not change, so mark it as the sign of the
+		// result (free with DAEDALUS_LAZY_SIGN_EXTEND). The high half used to
+		// be left as it was, so rt kept the high half of its old value.
+		if( rt != rs )
+		{
+			UpdateRegister( rt, dst_reg, URO_HI_SIGN_EXTEND );
+		}
+		else
+		{
+			StoreRegisterLo( rt, dst_reg );
+		}
+#else
 		StoreRegisterLo( rt, dst_reg );
+#endif
 
 #ifdef ENABLE_64BIT	//This is out of spec but seems we can always ignore copying the hi part
 		// If the source/dest regs are different we need to copy the high bits across
@@ -3827,7 +3848,22 @@ inline void	CCodeGeneratorPSP::GenerateXORI( EN64Reg rt, EN64Reg rs, u16 immedia
 		EPspReg dst_reg( GetRegisterNoLoadLo( rt, PspReg_V0 ) );
 		EPspReg	src_reg( GetRegisterAndLoadLo( rs, PspReg_A0 ) );
 		XORI( dst_reg, src_reg, immediate );
+#if DAEDALUS_ORI_SIGN_EXTEND_HI
+		// rt's high half is rs's high half. For 32 bit values that is the sign
+		// of rs, which XORI does not change, so mark it as the sign of the
+		// result (free with DAEDALUS_LAZY_SIGN_EXTEND). The high half used to
+		// be left as it was, so rt kept the high half of its old value.
+		if( rt != rs )
+		{
+			UpdateRegister( rt, dst_reg, URO_HI_SIGN_EXTEND );
+		}
+		else
+		{
+			StoreRegisterLo( rt, dst_reg );
+		}
+#else
 		StoreRegisterLo( rt, dst_reg );
+#endif
 
 #ifdef ENABLE_64BIT	//This is out of spec but seems we can always ignore copying the hi part
 		// If the source/dest regs are different we need to copy the high bits across
