@@ -4603,7 +4603,10 @@ inline void	CCodeGeneratorPSP::GenerateCFC1( EN64Reg rt, u32 fs )
 		EPspReg			reg_dst( GetRegisterNoLoadLo( rt, PspReg_V0 ) );
 
 		GetVar( reg_dst, &gCPUState.FPUControl[ fs ]._u32 );
-#ifdef ENABLE_64BIT
+#if defined( ENABLE_64BIT ) || DAEDALUS_ORI_SIGN_EXTEND_HI
+		// CFC1 sign extends. The high half used to be left as it was, so rt
+		// kept the high half of its old value (seen in SM64 at 0x801a181c).
+		// Free with DAEDALUS_LAZY_SIGN_EXTEND.
 		UpdateRegister( rt, reg_dst, URO_HI_SIGN_EXTEND );
 #else
 		StoreRegisterLo( rt, reg_dst );
