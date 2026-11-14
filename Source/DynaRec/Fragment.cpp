@@ -27,6 +27,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "Debug/Registers.h"
 #include "Core/CPU.h"			// Try to remove this cyclic dependency
+#include "Core/Memory.h"
 #include "Core/R4300.h"
 #include "Core/Interrupt.h"
 #include "Debug/DBGConsole.h"
@@ -69,6 +70,63 @@ namespace
 #endif
 
 }
+
+#ifndef DAEDALUS_LIKELY_DELAY_SLOT_IN_EXIT
+#ifdef DAEDALUS_PSP
+#define DAEDALUS_LIKELY_DELAY_SLOT_IN_EXIT 1
+#else
+#define DAEDALUS_LIKELY_DELAY_SLOT_IN_EXIT 0
+#endif
+#endif
+
+#if DAEDALUS_LIKELY_DELAY_SLOT_IN_EXIT
+//*************************************************************************************
+//	A "branch likely" runs its delay slot only when taken. When the trace went
+//	the not-taken way, the delay slot is not in the trace, and the exit for the
+//	taken way used to leave it to the interpreter: the fragment returned to the
+//	dispatcher with the delay slot pending, the interpreter ran that one
+//	instruction, and the dispatcher looked up the target. In SM64 one such exit
+//	(0x80316564, BEQL) went that way 55000 times in 2000 frames. Now the delay
+//	slot is compiled into the exit, which then links straight to the target.
+//	Only plain instructions in directly readable RAM qualify.
+//*************************************************************************************
+static bool FetchLikelyDelaySlot( u32 address, STraceEntry * p_entry )
+{
+	const MemFuncRead & m( g_MemoryLookupTableRead[ address >> 18 ] );
+	if( m.pRead == nullptr )
+		return false;	// ROM or TLB: leave it to the interpreter
+
+	OpCode op_code;
+	op_code._u32 = *reinterpret_cast< const u32 * >( m.pRead + address );
+
+	StaticAnalysis::RegisterUsage usage;
+	StaticAnalysis::Analyse( op_code, usage );
+	if( usage.BranchType != BT_NOT_BRANCH )
+		return false;
+
+	switch( op_code.op )
+	{
+	case OP_SRHACK1: case OP_SRHACK2: case OP_PATCH: case OP_SRHACK_UNOPT:
+	case OP_SRHACK_OPT: case OP_SRHACK_NOOPT: case OP_DBG_BKPT:
+	case OP_COPRO0: case OP_CACHE:
+		return false;
+	case OP_SPECOP:
+		if( op_code.spec_op == SpecOp_SYSCALL || op_code.spec_op == SpecOp_BREAK )
+			return false;
+		break;
+	default:
+		break;
+	}
+
+	p_entry->Address = address;
+	p_entry->OpCode = op_code;
+	p_entry->Usage = usage;
+	p_entry->Usage.Access8000 = false;		// unknown: memory accesses take the checked path
+	p_entry->BranchIdx = u32( ~0 );
+	p_entry->BranchDelaySlot = true;
+	return true;
+}
+#endif
 
 //*************************************************************************************
 //	Code pages: the 4 KB pages (numbered from 0x80000000, first 8 MB) that hold
@@ -138,6 +196,7 @@ CFragment::CFragment( std::shared_ptr<CCodeBufferManager> p_manager,
 	for( const STraceEntry & e : trace )
 	{
 		AddCodePage( mCodePages, e.Address );
+		AddCodePage( mCodePages, e.Address + 4 );	// a branch delay slot compiled into an exit (see Assemble)
 	}
 	FinishCodePages( mCodePages );
 
@@ -843,6 +902,22 @@ void CFragment::Assemble( std::shared_ptr<CCodeBufferManager> p_manager,
 		}
 
 
+#if DAEDALUS_LIKELY_DELAY_SLOT_IN_EXIT
+		STraceEntry		delay_entry;
+		if( details.Likely && !details.ConditionalBranchTaken && details.Direct &&
+			FetchLikelyDelaySlot( branch_instruction_address + 4, &delay_entry ) )
+		{
+			// The branch is taken here: run its delay slot, then go to the target
+			p_generator->SetBranchTarget( details.TargetAddress );
+			p_generator->SetInstructionsExecuted( num_instructions_executed );
+			p_generator->GenerateOpCode( delay_entry, true, nullptr, nullptr );
+			num_instructions_executed++;
+
+			CJumpLocation	jump_location( p_generator->GenerateExitCode( details.TargetAddress, NO_JUMP_ADDRESS, num_instructions_executed, no_next_fragment ) );
+			AddPatch( details.TargetAddress, jump_location );
+		}
+		else
+#endif
 		if( details.Likely )
 		{
 			u32				exit_address = 0;

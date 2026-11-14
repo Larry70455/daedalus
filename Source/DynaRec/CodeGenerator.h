@@ -59,6 +59,11 @@ class CCodeGenerator
 		// by generators that make reads of COUNT exact; ignored by default.
 		virtual void				SetInstructionsExecuted( u32 count ) { (void)count; }
 
+		// Store the branch target in gCPUState.TargetPC (needed before code for
+		// a branch delay slot that may leave the fragment). Only generators that
+		// support DAEDALUS_LIKELY_DELAY_SLOT_IN_EXIT implement it.
+		virtual void				SetBranchTarget( u32 target ) { (void)target; }
+
 		virtual RegisterSnapshotHandle	GetRegisterSnapshot() = 0;
 
 		virtual CCodeLabel			GetEntryPoint() const = 0;

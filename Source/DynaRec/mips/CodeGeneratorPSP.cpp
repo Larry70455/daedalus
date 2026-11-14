@@ -2120,6 +2120,11 @@ CJumpLocation	CCodeGeneratorPSP::GenerateOpCode( const STraceEntry& ti, bool bra
 //	calling this function.
 //
 
+void	CCodeGeneratorPSP::SetBranchTarget( u32 target )
+{
+	SetVar( &gCPUState.TargetPC, target );
+}
+
 // Move COUNT and the event countdown forward (before a call out of the
 // fragment) or back (after it returns) by the instructions this fragment has
 // already run. See DAEDALUS_EXACT_COUNT_READ. Uses (clobbers) t0 and t1.

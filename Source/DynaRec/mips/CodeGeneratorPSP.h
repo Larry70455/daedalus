@@ -44,6 +44,7 @@ class CCodeGeneratorPSP : public CCodeGenerator, public CAssemblyWriterPSP
 
 		virtual void				UpdateRegisterCaching( u32 instruction_idx );
 		virtual void				SetInstructionsExecuted( u32 count )	{ mInstructionsExecuted = count; }
+		virtual void				SetBranchTarget( u32 target );
 
 		virtual RegisterSnapshotHandle	GetRegisterSnapshot();
 
