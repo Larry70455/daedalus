@@ -57,6 +57,8 @@ class CNativeTexture
 		static	std::shared_ptr<CNativeTexture>		CreateRenderTarget( u32 n64_width, u32 n64_height, u32 scale );
 		inline void *					GetRenderTargetPointer() const	{ return mpData; }
 		inline u32						GetRenderTargetStride() const	{ return mCorrectedWidth; }
+		// PSP pixels per N64 texel: "scale" for a render target, 1 otherwise
+		inline f32						GetTexelScale() const			{ return mpDataAllocation != nullptr ? mScale.x * mCorrectedWidth : 1.0f; }
 #endif
 
 		void							InstallTexture() const;

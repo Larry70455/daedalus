@@ -704,6 +704,16 @@ void RendererPSP::TexRect( u32 tile_idx, const glm::vec2 & xy0, const glm::vec2 
 	glm::vec2 uv0( (float)st0.s / 32.f, (float)st0.t / 32.f );
 	glm::vec2 uv1( (float)st1.s / 32.f, (float)st1.t / 32.f );
 
+	// 2D drawing takes texture coordinates in stored pixels. A picture the
+	// game drew offscreen (render target) is stored at a higher resolution
+	// than the N64 image, so scale them, or only its top left corner shows.
+	if( mBoundTexture[ 0 ] != nullptr )
+	{
+		const f32 texel_scale = mBoundTexture[ 0 ]->GetTexelScale();
+		uv0 *= texel_scale;
+		uv1 *= texel_scale;
+	}
+
 	glm::vec2 screen0;
 	glm::vec2 screen1;
 	if( gGlobalPreferences.ViewportType == VT_FULLSCREEN_HD )
@@ -798,6 +808,16 @@ void RendererPSP::TexRectFlip( u32 tile_idx, const glm::vec2 & xy0, const glm::v
 	// NB: would be nice to pass these as s16 ints, and use GU_TEXTURE_16BIT
 	glm::vec2 uv0( (float)st0.s / 32.f, (float)st0.t / 32.f );
 	glm::vec2 uv1( (float)st1.s / 32.f, (float)st1.t / 32.f );
+
+	// 2D drawing takes texture coordinates in stored pixels. A picture the
+	// game drew offscreen (render target) is stored at a higher resolution
+	// than the N64 image, so scale them, or only its top left corner shows.
+	if( mBoundTexture[ 0 ] != nullptr )
+	{
+		const f32 texel_scale = mBoundTexture[ 0 ]->GetTexelScale();
+		uv0 *= texel_scale;
+		uv1 *= texel_scale;
+	}
 
 	glm::vec2 screen0;
 	glm::vec2 screen1;
@@ -1338,6 +1358,13 @@ void RendererPSP::SetColorImage( u32 address, u32 width, u32 format, u32 size )
 	mN64ToScreenTranslate = glm::vec2( 0.0f, 0.0f );
 	UpdateViewport();
 	sceGuScissor( 0, 0, width * kRenderTargetScale, width * kRenderTargetScale );
+
+	// The game clears the depth buffer for its N64 sized picture, which only
+	// covers part of this higher resolution one: depth left over from the
+	// main scene then hid parts of the picture. Clear all of it here (the
+	// scissor above limits the clear to the picture).
+	sceGuClearDepth( 0 );
+	sceGuClear( GU_DEPTH_BUFFER_BIT | GU_FAST_CLEAR_BIT );
 }
 
 void RendererPSP::EndRenderTarget()

@@ -1134,7 +1134,11 @@ void DLParser_SetCImg( MicroCodeCommand command )
 	g_CI.Size   = command.img.siz;
 	g_CI.Width  = command.img.width + 1;
 	g_CI.Address = RDPSegAddr(command.img.addr);
-	gRenderer->SetColorImage( g_CI.Address, g_CI.Width, g_CI.Format, g_CI.Size );
+	// Drawing into the depth buffer (games clear it this way) is never a picture
+	if( g_CI.Address == g_DI.Address )
+		gRenderer->EndRenderTarget();
+	else
+		gRenderer->SetColorImage( g_CI.Address, g_CI.Width, g_CI.Format, g_CI.Size );
 	//g_CI.Bpl		= g_CI.Width << g_CI.Size >> 1;
 
 	DL_PF("    CImg Adr[0x%08x] Format[%s] Size[%s] Width[%d]", g_CI.Address, gFormatNames[ g_CI.Format ], gSizeNames[ g_CI.Size ], g_CI.Width);
