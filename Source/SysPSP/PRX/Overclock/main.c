@@ -174,6 +174,47 @@ int pspOverclockSet( int target_mhz )
 	return (int)( gCurrentMul * PLL_BASE_MHZ / PLL_DEN );
 }
 
+/*
+ * PSP hardware profiler (used by the perf log build to measure cache misses
+ * and memory stalls on real hardware). 20 counters at 0xBC400000, the same
+ * layout as PspDebugProfilerRegs in pspdebug.h: enable, system clocks, CPU
+ * clocks, internal stalls, memory stalls, ..., I cache misses, D cache
+ * misses, D cache write backs, ... They can only be read in kernel mode.
+ */
+#define PROFILER_REGS		((volatile unsigned int *)0xBC400000)
+#define PROFILER_NUM_REGS	20
+
+/* Clear the counters and start counting. Returns 0. */
+int pspProfilerStart( void )
+{
+	int k1 = pspSdkSetK1( 0 );
+	int i;
+	PROFILER_REGS[0] = 0;
+	sync();
+	for( i = 1; i < PROFILER_NUM_REGS; i++ )
+		PROFILER_REGS[i] = 0;
+	PROFILER_REGS[0] = 1;
+	sync();
+	pspSdkSetK1( k1 );
+	return 0;
+}
+
+/* Copy up to count counters (from the enable flag on) to out. Returns the number copied. */
+int pspProfilerRead( unsigned int * out, int count )
+{
+	int k1 = pspSdkSetK1( 0 );
+	unsigned int regs[ PROFILER_NUM_REGS ];
+	int i;
+	if( count > PROFILER_NUM_REGS )
+		count = PROFILER_NUM_REGS;
+	for( i = 0; i < count; i++ )
+		regs[i] = PROFILER_REGS[i];
+	for( i = 0; i < count; i++ )
+		out[i] = regs[i];
+	pspSdkSetK1( k1 );
+	return count;
+}
+
 int module_start( SceSize args, void * argp )
 {
 	return 0;

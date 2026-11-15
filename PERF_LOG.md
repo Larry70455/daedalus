@@ -36,9 +36,11 @@ folder.
 3. Try to include a part that feels slow to you (for example a busy level or
    a menu that stutters).
 4. Press **SELECT** to open the pause menu and choose **Return to Main Menu**.
-   This writes the summary at the end of the log. If you quit with the HOME
-   button instead, most of the log is still saved (it is written every few
-   seconds), but the summary is missing.
+   This writes the log and its summary. The log is kept in memory while you
+   play (writing to the memory stick causes stutter) and written when the
+   pause menu opens and when you leave the game, so **always quit through the
+   pause menu**: quitting with the HOME button loses everything since the
+   last time the pause menu was opened.
 5. Repeat for each game you care about. Each game gets its own files, and
    running a game again adds a new session to the end of the same file.
 
@@ -97,6 +99,24 @@ the game runs slower than full speed.
 | `log_io`      | Writing these log files                                            |
 | `interp_ops`  | N64 instructions run by the plain interpreter                      |
 | `fallback_ops`| Instructions the dynarec handed back to the interpreter            |
+
+On a real PSP the log also has `hw_` columns from the PSP's hardware profiler
+(read through `Plugins/overclock.prx`; the header says whether it is on).
+They are counts per vertical blank for everything the main CPU did:
+
+| Column           | Meaning                                                        |
+|------------------|----------------------------------------------------------------|
+| `hw_cycles`      | CPU clock cycles                                               |
+| `hw_mem_stall`   | Cycles the CPU waited for memory (cache misses and the like)   |
+| `hw_int_stall`   | Cycles lost to internal stalls (for example waiting for a multiply) |
+| `hw_imiss`       | Instruction cache misses                                       |
+| `hw_dmiss`       | Data cache misses                                              |
+| `hw_dwriteback`  | Data cache lines written back to memory                        |
+| `hw_uncached_ld` / `hw_uncached_st` | Uncached loads and stores                   |
+| `hw_bus`         | Bus accesses                                                   |
+
+The summary gives their averages and the share of cycles lost to memory
+stalls. Emulators such as PPSSPP do not emulate these counters (they read 0).
 
 Each time is counted once, in the most specific bucket. For example, texture
 conversion that happens while reading the display list is counted under

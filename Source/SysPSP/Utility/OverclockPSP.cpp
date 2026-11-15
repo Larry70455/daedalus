@@ -36,6 +36,11 @@ static bool LoadModule()
 	return gOverclockModule >= 0;
 }
 
+bool PSP_LoadKernelHelperModule()
+{
+	return LoadModule();
+}
+
 int PSP_ApplyOverclockPreference()
 {
 	const int wanted = gGlobalPreferences.Overclock400 ? 400 : 333;

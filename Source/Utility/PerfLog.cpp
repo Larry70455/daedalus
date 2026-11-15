@@ -30,6 +30,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "Core/R4300OpCode.h"
 #include "Utility/Paths.h"
 #include "Interface/ConfigOptions.h"
+#ifdef DAEDALUS_PSP
+#include "SysPSP/Utility/OverclockPSP.h"
+#endif
 
 #include <algorithm>
 #include <cstdio>
@@ -485,6 +488,47 @@ static void WriteSystemInfo( std::string & out )
 }
 #endif
 
+// Hardware profiler (PSP perf log builds): per vertical blank, how many CPU
+// cycles there were and how many were lost to memory stalls, plus the cache
+// miss counts. Read through Plugins/overclock.prx (kernel mode only). The
+// counters cover everything the main CPU does in that time.
+#ifdef DAEDALUS_PSP
+extern "C" int pspProfilerStart( void );
+extern "C" int pspProfilerRead( unsigned int * out, int count );
+static const u32	kHwNumRegs = 20;
+static const u32	kHwRegs[] = { 2, 4, 3, 13, 14, 15, 9, 10, 8 };	// indices into PspDebugProfilerRegs
+static const char * const kHwNames[] = { "hw_cycles", "hw_mem_stall", "hw_int_stall", "hw_imiss", "hw_dmiss", "hw_dwriteback", "hw_uncached_ld", "hw_uncached_st", "hw_bus" };
+static const u32	kHwNumCols = sizeof( kHwRegs ) / sizeof( kHwRegs[0] );
+static bool			gHwProfiler = false;
+static unsigned int	gHwPrev[ kHwNumRegs ];
+static u64			gHwTotal[ kHwNumCols ];
+
+static void HwProfilerOpen()
+{
+	gHwProfiler = PSP_LoadKernelHelperModule() && pspProfilerStart() == 0 &&
+				  pspProfilerRead( gHwPrev, kHwNumRegs ) == (int)kHwNumRegs && gHwPrev[0] != 0;	// [0] is the enable flag
+	memset( gHwTotal, 0, sizeof( gHwTotal ) );
+}
+
+// Appends this vertical blank's counter deltas to the CSV line
+static int HwProfilerColumns( char * line, int len, int size )
+{
+	if( !gHwProfiler )
+		return len;
+	unsigned int now[ kHwNumRegs ];
+	if( pspProfilerRead( now, kHwNumRegs ) != (int)kHwNumRegs )
+		return len;
+	for( u32 i = 0; i < kHwNumCols && len > 0 && len < size; ++i )
+	{
+		u32 d = now[ kHwRegs[i] ] - gHwPrev[ kHwRegs[i] ];	// wraps correctly
+		gHwTotal[ i ] += d;
+		len += snprintf( line + len, size - len, ",%u", d );
+	}
+	memcpy( gHwPrev, now, sizeof( gHwPrev ) );
+	return len;
+}
+#endif
+
 void OpenGame()
 {
 	CloseGame();
@@ -513,6 +557,9 @@ void OpenGame()
 	gPending += line;
 #ifdef DAEDALUS_PSP
 	WriteSystemInfo( gPending );
+	HwProfilerOpen();
+	gPending += gHwProfiler ? "# system: hardware profiler on (hw_ columns: counts per vertical blank)\n"
+							: "# system: hardware profiler not available\n";
 #endif
 
 	gPending += "vi,flips,total";
@@ -521,7 +568,16 @@ void OpenGame()
 		gPending += ',';
 		gPending += kCategoryNames[ i ];
 	}
-	gPending += ",interp_ops,fallback_ops\n";
+	gPending += ",interp_ops,fallback_ops";
+#ifdef DAEDALUS_PSP
+	if( gHwProfiler )
+		for( u32 i = 0; i < kHwNumCols; ++i )
+		{
+			gPending += ',';
+			gPending += kHwNames[ i ];
+		}
+#endif
+	gPending += '\n';
 
 	gFallbacks.clear();
 	memset( gPcKey, 0, sizeof( gPcKey ) );
@@ -563,7 +619,7 @@ void EndFrame()
 
 	u32 total = now - gFrameStart;
 
-	char line[ 256 ];
+	char line[ 512 ];
 	int len = snprintf( line, sizeof( line ), "%u,%u,%u", gFrameIndex, gFlipsThisFrame, total );
 	for( u32 i = 0; i < kNumCategories && len > 0 && len < (int)sizeof( line ); ++i )
 	{
@@ -571,7 +627,10 @@ void EndFrame()
 		gTotalMicros[ i ] += gFrameMicros[ i ];
 	}
 	if( len > 0 && len < (int)sizeof( line ) )
-		snprintf( line + len, sizeof( line ) - len, ",%u,%u", gInterpretedOps, gFallbackOps );
+		len += snprintf( line + len, sizeof( line ) - len, ",%u,%u", gInterpretedOps, gFallbackOps );
+#ifdef DAEDALUS_PSP
+	len = HwProfilerColumns( line, len, (int)sizeof( line ) );
+#endif
 	gPending += line;
 	gPending += '\n';
 	gTotalInterpreted += gInterpretedOps;
@@ -631,6 +690,22 @@ void CloseGame()
 		snprintf( line, sizeof( line ), "# summary: vertical blanks with audio off %u, async %u, sync %u\n",
 				  gAudioModeFrames[ 0 ], gAudioModeFrames[ 1 ], gAudioModeFrames[ 2 ] );
 		gPending += line;
+#ifdef DAEDALUS_PSP
+		if( gHwProfiler )
+		{
+			for( u32 i = 0; i < kHwNumCols; ++i )
+			{
+				snprintf( line, sizeof( line ), "# summary: %-14s avg %10.0f per vertical blank\n", kHwNames[ i ], f64( gHwTotal[ i ] ) / f64( gFrameIndex ) );
+				gPending += line;
+			}
+			if( gHwTotal[ 0 ] > 0 )
+			{
+				snprintf( line, sizeof( line ), "# summary: memory stall cycles %.1f%% of CPU cycles, internal stalls %.1f%%\n",
+						  100.0 * f64( gHwTotal[ 1 ] ) / f64( gHwTotal[ 0 ] ), 100.0 * f64( gHwTotal[ 2 ] ) / f64( gHwTotal[ 0 ] ) );
+				gPending += line;
+			}
+		}
+#endif
 	}
 
 	Flush();

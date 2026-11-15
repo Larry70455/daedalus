@@ -32,4 +32,8 @@ int		PSP_ApplyOverclockPreference();
 // Back to 333 MHz (call before exiting)
 void	PSP_RestoreNormalClock();
 
+// Loads Plugins/overclock.prx without changing the clock (the perf log uses
+// its hardware profiler functions). Returns true if the module is loaded.
+bool	PSP_LoadKernelHelperModule();
+
 #endif // SYSPSP_UTILITY_OVERCLOCKPSP_H_
