@@ -61,11 +61,73 @@ void ENVMIXER_GE(AudioHLECommand command [[maybe_unused]]) {
   // Not implemented
 }
 
-void ENVMIXER2(AudioHLECommand command) {
-  // fprintf (dfile, "ENVMIXER: cmd0 = %08X, cmd1 = %08X\n", command.cmd0,
-  // command.cmd1);
-  s16 vec9, vec10;
+// One 8 sample step of ENVMIXER2 (see below). The arithmetic is exactly that
+// of the original loop, element by element in the same order (the buffers
+// can overlap, so the order of the saturating adds matters).
+#define DAEDALUS_ENVMIXER2_STEP(X, VOL_DRY, VOL_WET, VOL_FX)                     \
+  {                                                                            \
+    const u32 in = (u32)(s32)buffs3[(X) ^ 1];                                  \
+    s16 vec9 = (s16)((in * (VOL_DRY)) >> 0x10) ^ m0;                           \
+    s16 vec10 = (s16)((in * (VOL_WET)) >> 0x10) ^ m1;                          \
+    bufft6[(X) ^ 1] = Saturate<s16>(bufft6[(X) ^ 1] + vec9);                   \
+    bufft7[(X) ^ 1] = Saturate<s16>(bufft7[(X) ^ 1] + vec10);                  \
+    vec9 = (s16)(((u32)(s32)vec9 * (VOL_FX)) >> 0x10) ^ m2;                    \
+    vec10 = (s16)(((u32)(s32)vec10 * (VOL_FX)) >> 0x10) ^ m3;                  \
+    if (kSwap) {                                                               \
+      buffs0[(X) ^ 1] = Saturate<s16>(buffs0[(X) ^ 1] + vec10);                \
+      buffs1[(X) ^ 1] = Saturate<s16>(buffs1[(X) ^ 1] + vec9);                 \
+    } else {                                                                   \
+      buffs0[(X) ^ 1] = Saturate<s16>(buffs0[(X) ^ 1] + vec9);                 \
+      buffs1[(X) ^ 1] = Saturate<s16>(buffs1[(X) ^ 1] + vec10);                \
+    }                                                                          \
+  }
 
+// The volumes (env[]) and steps are kept in locals: the original read them
+// from memory for every sample, because the compiler cannot prove that the
+// s16 sample stores do not change the u16 env[] array. Same results, about
+// half the work per sample on the PSP. kSwap: command bit 0x10 (swaps the
+// two effect outputs). kMK: Mario Kart ABI (8 samples per step, no ramp of
+// the effect volume).
+template <bool kSwap, bool kMK>
+static void EnvMixer2Loop(s16 *buffs3, s16 *bufft6, s16 *bufft7, s16 *buffs0,
+                          s16 *buffs1, s32 count, s16 m0, s16 m1, s16 m2,
+                          s16 m3, u32 adder) {
+  u32 e0 = env[0], e1 = env[1], e2 = env[2], e3 = env[3], e4 = env[4],
+      e5 = env[5];
+  const u32 s5 = gEnv_s5, s6 = gEnv_s6, t3 = gEnv_t3;
+
+  // Fully unrolled: the sample offsets become constants and the compiler
+  // can overlap the multiplies (each mult/mflo pair otherwise stalls)
+  while (count > 0) {
+#pragma GCC unroll 8
+    for (int x = 0; x < 0x8; x++)
+      DAEDALUS_ENVMIXER2_STEP(x, e0, e2, e4)
+
+    if (!kMK)
+#pragma GCC unroll 8
+      for (int x = 0x8; x < 0x10; x++)
+        DAEDALUS_ENVMIXER2_STEP(x, e1, e3, e5)
+
+    bufft6 += adder;
+    bufft7 += adder;
+    buffs0 += adder;
+    buffs1 += adder;
+    buffs3 += adder;
+    count -= adder;
+    e0 = Sample_Mask(e0 + s5);
+    e1 = Sample_Mask(e1 + s5);
+    e2 = Sample_Mask(e2 + s6);
+    e3 = Sample_Mask(e3 + s6);
+    e4 = Sample_Mask(e4 + t3);
+    e5 = Sample_Mask(e5 + t3);
+  }
+
+  env[0] = e0; env[1] = e1; env[2] = e2;
+  env[3] = e3; env[4] = e4; env[5] = e5;
+}
+#undef DAEDALUS_ENVMIXER2_STEP
+
+void ENVMIXER2(AudioHLECommand command) {
   s16 *buffs3 =
       (s16 *)(gAudioHLEState.Buffer + ((command.cmd0 >> 0x0c) & 0x0ff0));
   s16 *bufft6 =
@@ -77,11 +139,11 @@ void ENVMIXER2(AudioHLECommand command) {
   s16 *buffs1 =
       (s16 *)(gAudioHLEState.Buffer + ((command.cmd1 << 0x04) & 0x0ff0));
 
-  s16 v2[8];
-  v2[0] = 0 - (s16)((command.cmd0 & 0x2) >> 1);
-  v2[1] = 0 - (s16)((command.cmd0 & 0x1));
-  v2[2] = 0 - (s16)((command.cmd0 & 0x8) >> 1);
-  v2[3] = 0 - (s16)((command.cmd0 & 0x4) >> 1);
+  // Sign masks: xor with 0 keeps a value, xor with -1 inverts it
+  const s16 m0 = 0 - (s16)((command.cmd0 & 0x2) >> 1);
+  const s16 m1 = 0 - (s16)((command.cmd0 & 0x1));
+  const s16 m2 = 0 - (s16)((command.cmd0 & 0x8) >> 1);
+  const s16 m3 = 0 - (s16)((command.cmd0 & 0x4) >> 1);
 
   s32 count = (command.cmd0 >> 8) & 0xff;
 
@@ -97,65 +159,13 @@ void ENVMIXER2(AudioHLECommand command) {
     gEnv_t3 = 0;
   }
 
-  while (count > 0) {
-    int temp;
-    for (int x = 0; x < 0x8; x++) {
-      vec9 = (s16)(((s32)buffs3[x ^ 1] * (u32)env[0]) >> 0x10) ^ v2[0];
-      vec10 = (s16)(((s32)buffs3[x ^ 1] * (u32)env[2]) >> 0x10) ^ v2[1];
-      temp = bufft6[x ^ 1] + vec9;
-      bufft6[x ^ 1] = Saturate<s16>(temp);
-      temp = bufft7[x ^ 1] + vec10;
-      bufft7[x ^ 1] = Saturate<s16>(temp);
-      vec9 = (s16)(((s32)vec9 * (u32)env[4]) >> 0x10) ^ v2[2];
-      vec10 = (s16)(((s32)vec10 * (u32)env[4]) >> 0x10) ^ v2[3];
-      if (command.cmd0 & 0x10) {
-        temp = buffs0[x ^ 1] + vec10;
-        buffs0[x ^ 1] = Saturate<s16>(temp);
-        temp = buffs1[x ^ 1] + vec9;
-        buffs1[x ^ 1] = Saturate<s16>(temp);
-      } else {
-        temp = buffs0[x ^ 1] + vec9;
-        buffs0[x ^ 1] = Saturate<s16>(temp);
-        temp = buffs1[x ^ 1] + vec10;
-        buffs1[x ^ 1] = Saturate<s16>(temp);
-      }
-    }
-
-    if (!isMKABI)
-      for (int x = 0x8; x < 0x10; x++) {
-        vec9 = (s16)(((s32)buffs3[x ^ 1] * (u32)env[1]) >> 0x10) ^ v2[0];
-        vec10 = (s16)(((s32)buffs3[x ^ 1] * (u32)env[3]) >> 0x10) ^ v2[1];
-        temp = bufft6[x ^ 1] + vec9;
-        bufft6[x ^ 1] = Saturate<s16>(temp);
-        temp = bufft7[x ^ 1] + vec10;
-        bufft7[x ^ 1] = Saturate<s16>(temp);
-        vec9 = (s16)(((s32)vec9 * (u32)env[5]) >> 0x10) ^ v2[2];
-        vec10 = (s16)(((s32)vec10 * (u32)env[5]) >> 0x10) ^ v2[3];
-        if (command.cmd0 & 0x10) {
-          temp = buffs0[x ^ 1] + vec10;
-          buffs0[x ^ 1] = Saturate<s16>(temp);
-          temp = buffs1[x ^ 1] + vec9;
-          buffs1[x ^ 1] = Saturate<s16>(temp);
-        } else {
-          temp = buffs0[x ^ 1] + vec9;
-          buffs0[x ^ 1] = Saturate<s16>(temp);
-          temp = buffs1[x ^ 1] + vec10;
-          buffs1[x ^ 1] = Saturate<s16>(temp);
-        }
-      }
-    bufft6 += adder;
-    bufft7 += adder;
-    buffs0 += adder;
-    buffs1 += adder;
-    buffs3 += adder;
-    count -= adder;
-    env[0] = Sample_Mask(env[0] + gEnv_s5);
-    env[1] = Sample_Mask(env[1] + gEnv_s5);
-    env[2] = Sample_Mask(env[2] + gEnv_s6);
-    env[3] = Sample_Mask(env[3] + gEnv_s6);
-    env[4] = Sample_Mask(env[4] + gEnv_t3);
-    env[5] = Sample_Mask(env[5] + gEnv_t3);
-  }
+  const bool swap = (command.cmd0 & 0x10) != 0;
+  if (isMKABI)
+    EnvMixer2Loop<false, true>(buffs3, bufft6, bufft7, buffs0, buffs1, count, m0, m1, m2, m3, adder);
+  else if (swap)
+    EnvMixer2Loop<true, false>(buffs3, bufft6, bufft7, buffs0, buffs1, count, m0, m1, m2, m3, adder);
+  else
+    EnvMixer2Loop<false, false>(buffs3, bufft6, bufft7, buffs0, buffs1, count, m0, m1, m2, m3, adder);
 }
 
 void ENVMIXER3(AudioHLECommand command) {
