@@ -890,20 +890,25 @@ void RendererPSP::FillRect( const glm::vec2 & xy0, const glm::vec2 & xy1, u32 co
 #endif
 	DaedalusVtx * p_vertices = static_cast<DaedalusVtx *>(sceGuGetMemory(2 * sizeof(DaedalusVtx)));
 
-	// No need for Texture.x/y as we don't do any texturing for fillrect
+	// A fill rectangle in 1 or 2 cycle mode goes through the colour combiner,
+	// and some games' combiners read the texture there (Pokemon Stadium 2's
+	// see-through shadows next to the battle boxes). The N64 then reads the
+	// texel at (0,0). The texture coordinates were left uninitialised here,
+	// so a random texel was read: the shadows flickered between invisible
+	// and solid black from frame to frame.
 	p_vertices[0].Position.x = screen0.x;
 	p_vertices[0].Position.y = screen0.y;
 	p_vertices[0].Position.z = 0.0f;
 	p_vertices[0].Colour = c32(color);
-	//p_vertices[0].Texture.x = 0.0f;
-	//p_vertices[0].Texture.y = 0.0f;
+	p_vertices[0].Texture.x = 0.0f;
+	p_vertices[0].Texture.y = 0.0f;
 
 	p_vertices[1].Position.x = screen1.x;
 	p_vertices[1].Position.y = screen1.y;
 	p_vertices[1].Position.z = 0.0f;
 	p_vertices[1].Colour = c32(color);
-	//p_vertices[1].Texture.x = 1.0f;
-	//p_vertices[1].Texture.y = 0.0f;
+	p_vertices[1].Texture.x = 0.0f;
+	p_vertices[1].Texture.y = 0.0f;
 
 	// FIXME(strmnnrmn): shouldn't this pass gRDPOtherMode.depth_source ? false : true for the disable_zbuffer arg, as TexRect()?
 	RenderUsingCurrentBlendMode( p_vertices, 2, GU_SPRITES, GU_TRANSFORM_2D, true );
