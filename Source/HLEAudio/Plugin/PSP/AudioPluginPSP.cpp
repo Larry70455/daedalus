@@ -254,7 +254,12 @@ EProcessResult	AudioPluginPSP::ProcessAList()
 				// so the original behaviour is back.
 				if(BeginME( mei, (int)&Audio_Ucode, (int)NULL, -1, NULL, -1, NULL) < 0)
 				{
+					DAEDALUS_PERF_STAT( kStatAudioMeBusy );	// No-op unless DAEDALUS_PERF_LOG
 					Audio_Ucode();
+				}
+				else
+				{
+					DAEDALUS_PERF_STAT( kStatAudioMeJobs );
 				}
 				result = PR_COMPLETED;
 				break;

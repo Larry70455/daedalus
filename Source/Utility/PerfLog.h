@@ -98,6 +98,8 @@ namespace PerfLog
 		kStatStaleOps,			// compiled instructions that no longer match memory after such a call (must be 0)
 		kStatPartialInvalidate,	// a write overlapped compiled code and only the affected fragments were dropped
 		kStatFragmentsDropped,	// fragments dropped that way
+		kStatAudioMeJobs,		// Async audio: audio lists handed to the Media Engine
+		kStatAudioMeBusy,		// Async audio: Media Engine still busy, the list ran on the main CPU
 		kNumStats
 	};
 	extern u32 gStats[ kNumStats ];
