@@ -55,6 +55,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "UI/DrawText.h"
 #include "UI/MainMenuScreen.h"
 #include "UI/PauseScreen.h"
+#include "Utility/PerfLog.h"
 #include "UI/SplashScreen.h"
 #include "UI/UIContext.h"
 #include <iostream>
@@ -222,6 +223,8 @@ void HandleEndOfFrame()
 
 	if(activate_pause_menu)
 	{
+
+		DAEDALUS_PERF_SAVE_NOW();	// write the perf log while paused, not during play (no-op unless DAEDALUS_PERF_LOG)
 
 		CGraphicsContext::Get()->SwitchToLcdDisplay();
 		CGraphicsContext::Get()->ClearAllSurfaces();

@@ -75,6 +75,7 @@ namespace PerfLog
 
 	void	OpenGame();		// Call after a ROM has been loaded
 	void	CloseGame();	// Call before the ROM is unloaded
+	void	SaveNow();		// Write everything collected so far (call when the game is paused)
 	void	EndFrame();		// Call once per N64 vertical blank
 	void	NoteFlip();		// Call when the game presents a new image
 
@@ -127,6 +128,7 @@ namespace PerfLog
 #define DAEDALUS_PERF_SCOPE( category )		PerfLog::Scope DAEDALUS_PERF_CONCAT( perf_scope_, __LINE__ )( PerfLog::category )
 #define DAEDALUS_PERF_OPEN_GAME()			PerfLog::OpenGame()
 #define DAEDALUS_PERF_CLOSE_GAME()			PerfLog::CloseGame()
+#define DAEDALUS_PERF_SAVE_NOW()			PerfLog::SaveNow()
 #define DAEDALUS_PERF_END_FRAME()			PerfLog::EndFrame()
 #define DAEDALUS_PERF_NOTE_FLIP()			PerfLog::NoteFlip()
 #define DAEDALUS_PERF_COUNT_INTERPRETED_OP( pc )	PerfLog::NoteInterpretedPC( pc )
@@ -137,6 +139,7 @@ namespace PerfLog
 #define DAEDALUS_PERF_SCOPE( category )		do {} while( 0 )
 #define DAEDALUS_PERF_OPEN_GAME()			do {} while( 0 )
 #define DAEDALUS_PERF_CLOSE_GAME()			do {} while( 0 )
+#define DAEDALUS_PERF_SAVE_NOW()			do {} while( 0 )
 #define DAEDALUS_PERF_END_FRAME()			do {} while( 0 )
 #define DAEDALUS_PERF_NOTE_FLIP()			do {} while( 0 )
 #define DAEDALUS_PERF_COUNT_INTERPRETED_OP( pc )	do {} while( 0 )

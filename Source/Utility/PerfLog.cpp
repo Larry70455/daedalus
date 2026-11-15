@@ -75,7 +75,11 @@ static inline u32 NowMicros()
 }
 
 static const u32	kMaxDepth = 16;			// Scopes nest only a few levels deep in practice
-static const size_t	kFlushThreshold = 24 * 1024;	// Bytes of text kept in memory before writing
+// Bytes of text kept in memory before writing. Writing to the memory stick
+// stalls the game for about 0.1 s or more, which showed up as lag spikes on
+// real hardware, so the log is written rarely: when this much has built up
+// (several minutes of play), when the pause menu opens, and at the end.
+static const size_t	kFlushThreshold = 1024 * 1024;
 
 static bool			gActive = false;
 static FILE *		gFile = nullptr;
@@ -108,7 +112,6 @@ struct FallbackStats
 };
 static std::unordered_map< u32, FallbackStats >	gFallbacks;
 static std::filesystem::path	gFallbackPath;
-static const u32				kFallbackDumpInterval = 600;	// Vertical blanks (about 10 seconds)
 
 // Hot address table for the plain interpreter: how often each instruction
 // address was interpreted (not recompiled). Open addressing, power of two size.
@@ -586,13 +589,15 @@ void EndFrame()
 	if( gPending.size() >= kFlushThreshold )
 		Flush();
 
-	if( ( gFrameIndex % kFallbackDumpInterval ) == 0 )
-	{
-		Push( kLogIo );
-		WriteFallbacks();
-		WriteInterpretedHot();
-		Pop();
-	}
+}
+
+void SaveNow()
+{
+	if( !gActive )
+		return;
+	Flush();
+	WriteFallbacks();
+	WriteInterpretedHot();
 }
 
 void CloseGame()
