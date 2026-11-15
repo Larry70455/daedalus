@@ -29,6 +29,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "Core/Memory.h"
 #include "Core/R4300OpCode.h"
 #include "Utility/Paths.h"
+#include "Interface/ConfigOptions.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -88,6 +89,10 @@ static u32			gLastMark = 0;			// Time at which the current bucket started being 
 static u32			gFrameMicros[ kNumCategories ];
 static u32			gFrameStart = 0;
 static u32			gFrameIndex = 0;
+// Vertical blanks spent in each audio mode (Off, Async, Sync): the mode can
+// change from the pause menu during a session
+static u32			gAudioModeFrames[ 3 ] = { 0, 0, 0 };
+static const char * const kAudioModeNames[ 3 ] = { "off", "async", "sync" };
 static u32			gFlipsThisFrame = 0;
 
 u32					gInterpretedOps = 0;
@@ -499,6 +504,8 @@ void OpenGame()
 	snprintf( line, sizeof( line ), "# session start, game \"%s\", crc %08x-%08x, units: microseconds per N64 vertical blank\n",
 			  g_ROM.settings.GameName.c_str(), g_ROM.mRomID.CRC[ 0 ], g_ROM.mRomID.CRC[ 1 ] );
 	gPending += line;
+	snprintf( line, sizeof( line ), "# settings: audio %s at start\n", (u32)gAudioPluginEnabled < 3 ? kAudioModeNames[ gAudioPluginEnabled ] : "?" );
+	gPending += line;
 #ifdef DAEDALUS_PSP
 	WriteSystemInfo( gPending );
 #endif
@@ -527,6 +534,7 @@ void OpenGame()
 	gTotalInterpreted = 0;
 	gTotalFallback = 0;
 	gFrameIndex = 0;
+	memset( gAudioModeFrames, 0, sizeof( gAudioModeFrames ) );
 	gDepth = 0;
 	gOverflow = 0;
 
@@ -569,6 +577,8 @@ void EndFrame()
 	gTotalFrameMicros += total;
 	gTotalFlips += gFlipsThisFrame;
 	gFrameIndex++;
+	if( (u32)gAudioPluginEnabled < 3 )
+		gAudioModeFrames[ gAudioPluginEnabled ]++;
 
 	ResetFrame( now );
 
@@ -609,6 +619,10 @@ void CloseGame()
 
 		snprintf( line, sizeof( line ), "# summary: interpreted ops avg %.0f, fallback ops avg %.0f per vertical blank\n",
 				  f64( gTotalInterpreted ) / f64( gFrameIndex ), f64( gTotalFallback ) / f64( gFrameIndex ) );
+		gPending += line;
+
+		snprintf( line, sizeof( line ), "# summary: vertical blanks with audio off %u, async %u, sync %u\n",
+				  gAudioModeFrames[ 0 ], gAudioModeFrames[ 1 ], gAudioModeFrames[ 2 ] );
 		gPending += line;
 	}
 
