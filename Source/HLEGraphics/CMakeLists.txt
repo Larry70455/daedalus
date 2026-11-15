@@ -32,3 +32,10 @@ endif(DAEDALUS_PROFILE_HLEGRAPHICS)
 
 list(APPEND daed_libs "HLEGraphics")
 set(daed_libs ${daed_libs} PARENT_SCOPE)
+
+# The PSP has a 16 KB instruction cache, and its hardware profiler showed the
+# display list code missing it constantly (about 52000 misses per frame in a
+# Pokemon Stadium 2 battle). -Os makes this code about 40 percent smaller.
+if(DAEDALUS_PSP AND DAEDALUS_PSP_GRAPHICS_OS)
+    target_compile_options(HLEGraphics PRIVATE -Os)
+endif()

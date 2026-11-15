@@ -111,6 +111,7 @@ else()
 	option(DAEDALUS_FRAMERATE_ANALYSIS "Output a CSV file containing framerate analysis" OFF)
 	option(DAEDALUS_STATE_CHECK "Interpreter vs dynarec check: if statecheck.txt exists, boot that ROM and dump CPU state every frame" OFF)
 	option(DAEDALUS_PERF_LOG "Write per frame timings (dynarec, display list, textures, GPU and audio waits) to PerfLogs/<game>.csv" OFF)
+	option(DAEDALUS_PSP_GRAPHICS_OS "PSP: compile the graphics code with -Os (smaller code, fewer instruction cache misses on the PSP)" OFF)
 	option(DAEDALUS_DEBUG_AUDIO "Output some Audio Samples to raw file" OFF)
 
 
