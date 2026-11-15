@@ -30,6 +30,13 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "DynaRec/N64RegisterCache.h"
 #include <stack>
 
+// Byte and halfword loads/stores reuse the cached "base + ram" register
+// (K0/K1) instead of recomputing the address: one instruction less each.
+// 0 restores the previous code.
+#ifndef DAEDALUS_SWIZZLE_USE_BASE_CACHE
+#define DAEDALUS_SWIZZLE_USE_BASE_CACHE 1
+#endif
+
 class CAssemblyBuffer;
 
 using CN64RegisterCachePSP = CN64RegisterCache<EPspReg>;
@@ -279,6 +286,9 @@ private:
 	
 				bool				GenerateDirectLoad( EPspReg psp_dst, EN64Reg n64_base, s16 offset, OpCodeValue load_op, u32 swizzle );
 				void				GenerateSlowLoad( u32 current_pc, EPspReg psp_dst, EPspReg reg_address, ReadMemoryFunction p_read_memory );
+				#if DAEDALUS_SWIZZLE_USE_BASE_CACHE
+				EPspReg		GetQuickBaseRegister( EN64Reg n64_base, EPspReg reg_base, bool for_store );
+				#endif
 				void				GenerateLoad( u32 current_pc, EPspReg psp_dst, EN64Reg n64_base, s16 offset, OpCodeValue load_op, u32 swizzle, ReadMemoryFunction p_read_memory );
 
 				bool				GenerateDirectStore( EPspReg psp_src, EN64Reg n64_base, s16 offset, OpCodeValue store_op, u32 swizzle );

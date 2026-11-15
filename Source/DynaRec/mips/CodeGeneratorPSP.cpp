@@ -2329,6 +2329,26 @@ void	CCodeGeneratorPSP::GenerateSlowLoad( u32 current_pc, EPspReg psp_dst, EPspR
 
 //
 
+#if DAEDALUS_SWIZZLE_USE_BASE_CACHE
+//	A register holding the N64 base register's value + gMemoryBaseReg: K0 or
+//	K1 if one already holds it (mPreviousLoadBase / mPreviousStoreBase),
+//	otherwise K0 (loads) or K1 (stores) is set up and remembered.
+EPspReg	CCodeGeneratorPSP::GetQuickBaseRegister( EN64Reg n64_base, EPspReg reg_base, bool for_store )
+{
+	if( n64_base == mPreviousLoadBase )		return PspReg_K0;
+	if( n64_base == mPreviousStoreBase )	return PspReg_K1;
+	if( for_store )
+	{
+		ADDU( PspReg_K1, reg_base, gMemoryBaseReg );
+		mPreviousStoreBase = n64_base;
+		return PspReg_K1;
+	}
+	ADDU( PspReg_K0, reg_base, gMemoryBaseReg );
+	mPreviousLoadBase = n64_base;
+	return PspReg_K0;
+}
+#endif
+
 void	CCodeGeneratorPSP::GenerateLoad( u32 current_pc,
 										 EPspReg psp_dst,
 										 EN64Reg n64_base,
@@ -2377,6 +2397,26 @@ void	CCodeGeneratorPSP::GenerateLoad( u32 current_pc,
 		{
 			if( swizzle != 0 )
 			{
+#if DAEDALUS_SWIZZLE_USE_BASE_CACHE
+				// Byte and halfword loads: (base + offset) ^ swizzle + ram
+				// equals (base + ram + offset) ^ swizzle, because the ram
+				// pointer (gMemoryBaseReg) has its low 2 bits clear: adding it
+				// neither changes bits 0-1 nor carries out of them. So the
+				// cached base + ram (K0/K1) can be reused: 3 instructions
+				// instead of 4, and later loads from the same base reuse it.
+				EPspReg	quick_base( GetQuickBaseRegister( n64_base, reg_address, false ) );
+				if( offset != 0 )
+				{
+					ADDIU( PspReg_A0, quick_base, offset );
+					XORI( PspReg_A0, PspReg_A0, swizzle );
+				}
+				else
+				{
+					XORI( PspReg_A0, quick_base, swizzle );
+				}
+				CAssemblyWriterPSP::LoadRegister( psp_dst, load_op, PspReg_A0, 0 );
+				return;
+#else
 				if( offset != 0 )
 				{
 					ADDIU( PspReg_A0, reg_address, offset );
@@ -2388,6 +2428,7 @@ void	CCodeGeneratorPSP::GenerateLoad( u32 current_pc,
 				ADDU( PspReg_A0, PspReg_A0, gMemoryBaseReg );
 				CAssemblyWriterPSP::LoadRegister( psp_dst, load_op, PspReg_A0, offset );
 				return;
+#endif
 			}
 
 			//Re use old base register if consegutive accesses from same base register //Corn
@@ -2396,6 +2437,13 @@ void	CCodeGeneratorPSP::GenerateLoad( u32 current_pc,
 				CAssemblyWriterPSP::LoadRegister( psp_dst, load_op, PspReg_K0, offset );
 				return;
 			}
+#if DAEDALUS_SWIZZLE_USE_BASE_CACHE
+			if( n64_base == mPreviousStoreBase )	// K1 holds the same base + ram
+			{
+				CAssemblyWriterPSP::LoadRegister( psp_dst, load_op, PspReg_K1, offset );
+				return;
+			}
+#endif
 			else
 			{
 				ADDU( PspReg_K0, reg_address, gMemoryBaseReg );
@@ -2675,6 +2723,21 @@ void	CCodeGeneratorPSP::GenerateStore( u32 current_pc,
 	{
 		if( swizzle != 0 )
 		{
+#if DAEDALUS_SWIZZLE_USE_BASE_CACHE
+			// Same as the byte/halfword loads in GenerateLoad
+			EPspReg	quick_base( GetQuickBaseRegister( n64_base, reg_address, true ) );
+			if( offset != 0 )
+			{
+				ADDIU( PspReg_A0, quick_base, offset );
+				XORI( PspReg_A0, PspReg_A0, swizzle );
+			}
+			else
+			{
+				XORI( PspReg_A0, quick_base, swizzle );
+			}
+			CAssemblyWriterPSP::StoreRegister( psp_src, store_op, PspReg_A0, 0 );
+			return;
+#else
 			if( offset != 0 )
 			{
 				ADDIU( PspReg_A0, reg_address, offset );
@@ -2686,6 +2749,7 @@ void	CCodeGeneratorPSP::GenerateStore( u32 current_pc,
 			ADDU( PspReg_A0, PspReg_A0, gMemoryBaseReg );
 			CAssemblyWriterPSP::StoreRegister( psp_src, store_op, PspReg_A0, offset );
 			return;
+#endif
 		}
 
 		//Re use old base register if consegutive accesses from same base register //Corn
@@ -2694,6 +2758,13 @@ void	CCodeGeneratorPSP::GenerateStore( u32 current_pc,
 			CAssemblyWriterPSP::StoreRegister( psp_src, store_op, PspReg_K1, offset );
 			return;
 		}
+#if DAEDALUS_SWIZZLE_USE_BASE_CACHE
+		if( n64_base == mPreviousLoadBase )	// K0 holds the same base + ram
+		{
+			CAssemblyWriterPSP::StoreRegister( psp_src, store_op, PspReg_K0, offset );
+			return;
+		}
+#endif
 		else
 		{
 			ADDU( PspReg_K1, reg_address, gMemoryBaseReg );
