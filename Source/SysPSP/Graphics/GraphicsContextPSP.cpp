@@ -20,6 +20,8 @@
 
 
 #include "Base/Types.h"
+#include <malloc.h>
+#include <psputils.h>
 #include <format>
 
 #include <pspgu.h>
@@ -58,11 +60,43 @@ static u32 SCR_MODE	  = GU_PSM_5650;
 //Get Dlist memory from malloc
 static u32* list[2];
 
+
 //static u32 __attribute__((aligned(16))) list[2][262144];	//Some games uses huge amount here like Star Soldier - Vanishing Earth
 static u32 __attribute__((aligned(16))) callList[64];
 static u32 __attribute__((aligned(16))) ilist[256];
 
 u32 listNum = 0;
+
+//*****************************************************************************
+// Frame vertex memory
+//
+// sceGuGetMemory returns memory inside the GE display list, which pspgu
+// always writes through uncached addresses. Vertex data written there
+// (conversion, colour combiner passes, fog copies: tens of thousands of
+// uncached stores and some uncached reads per frame) bypasses the data cache.
+// With double display, the display list built during a frame only reaches
+// the GE through sceGuCallList in UpdateFrame, so its vertices can be in
+// normal cached memory: one buffer per display list, written back from the
+// data cache just before the list is called, and reused only after the
+// sceGuSync that waits for that list. Without double display the list runs
+// while it is built, so PSP_AllocFrameVertices returns nullptr and callers
+// use sceGuGetMemory as before.
+//*****************************************************************************
+static const u32	kFrameVertexBytes = 512 * 1024;
+static u8 *			gFrameVertices[2] = { nullptr, nullptr };
+static u32			gFrameVerticesUsed[2] = { 0, 0 };
+
+void * PSP_AllocFrameVertices( u32 bytes )
+{
+	if( !gDoubleDisplayEnabled || gFrameVertices[ listNum ] == nullptr )
+		return nullptr;
+	const u32 offset = gFrameVerticesUsed[ listNum ];
+	const u32 aligned = ( bytes + 15 ) & ~15u;
+	if( offset + aligned > kFrameVertexBytes )
+		return nullptr;
+	gFrameVerticesUsed[ listNum ] = offset + aligned;
+	return gFrameVertices[ listNum ] + offset;
+}
 extern bool g32bitColorMode;
 extern bool gTakeScreenshotSS;
 //////////////////////////////////////////////
@@ -171,6 +205,10 @@ IGraphicsContext::IGraphicsContext()
 {
 	mpBuffers[ 0 ] = nullptr;
 	mpBuffers[ 1 ] = nullptr;
+
+	// See PSP_AllocFrameVertices (64 byte aligned: whole cache lines)
+	for( u32 i = 0; i < 2; ++i )
+		gFrameVertices[ i ] = static_cast< u8 * >( memalign( 64, kFrameVertexBytes ) );
 
 #if 1 //1->alloc in volatile memory, 0->alloc in VRAM //Corn
 	//Set up PSP Dlists in the extra 4MB space and make sure pointer are aligned to 16 bytes
@@ -359,10 +397,15 @@ void IGraphicsContext::UpdateFrame( bool wait_for_vbl )
 
 	if(gDoubleDisplayEnabled)
 	{
+		// This list's vertices (PSP_AllocFrameVertices) must be in memory
+		// before the GE reads them
+		if( gFrameVerticesUsed[ listNum ] != 0 )
+			sceKernelDcacheWritebackRange( gFrameVertices[ listNum ], gFrameVerticesUsed[ listNum ] );
 		sceGuStart(GU_DIRECT,callList);
 		sceGuCallList(list[listNum]);
 		sceGuFinish(); //Display Frame
 		listNum ^= 1;	//Toggle lists 0 & 1
+		gFrameVerticesUsed[ listNum ] = 0;	// its last use finished at the sceGuSync above
 		sceGuStart(GU_CALL,list[listNum]); //Begin other Display List
 	}
 	else

@@ -384,6 +384,18 @@ inline void RendererPSP::RenderFog( DaedalusVtx * p_vertices, u32 num_vertices, 
 	}
 }
 
+void * PSP_AllocFrameVertices( u32 bytes );
+
+// Vertex memory for a draw: cached frame memory if available, else GE list memory
+static DaedalusVtx * AllocVertices( u32 num_vertices )
+{
+	const u32 bytes = num_vertices * sizeof( DaedalusVtx );
+	void * p = PSP_AllocFrameVertices( bytes );
+	if( p == nullptr )
+		p = sceGuGetMemory( bytes );
+	return static_cast< DaedalusVtx * >( p );
+}
+
 void RendererPSP::RenderUsingCurrentBlendMode( DaedalusVtx * p_vertices, u32 num_vertices, u32 triangle_mode, u32 render_mode, bool disable_zbuffer )
 {
 	static bool	ZFightingEnabled = false;
@@ -536,7 +548,7 @@ void RendererPSP::RenderUsingCurrentBlendMode( DaedalusVtx * p_vertices, u32 num
 
 		if ( mTnL.Flags.Fog )
 		{
-			DaedalusVtx * p_FogVtx = static_cast<DaedalusVtx *>(sceGuGetMemory(num_vertices * sizeof(DaedalusVtx)));
+			DaedalusVtx * p_FogVtx = AllocVertices( num_vertices );
 			memcpy( p_FogVtx, p_vertices, num_vertices * sizeof( DaedalusVtx ) );
 			details.ColourAdjuster.Process( p_vertices, num_vertices );
 			sceGuDrawArray( triangle_mode, render_flags, num_vertices, nullptr, p_vertices );
@@ -580,7 +592,7 @@ void RendererPSP::RenderUsingRenderSettings( const CBlendStates * states, Daedal
 	DaedalusVtx * p_FogVtx( mVtx_Save );
 	if( mTnL.Flags.Fog )
 	{
-		p_FogVtx = static_cast<DaedalusVtx *>(sceGuGetMemory(num_vertices * sizeof(DaedalusVtx)));
+		p_FogVtx = AllocVertices( num_vertices );
 		memcpy( p_FogVtx, p_vertices, num_vertices * sizeof( DaedalusVtx ) );
 	}
 	else if( states->GetNumStates() > 1 )

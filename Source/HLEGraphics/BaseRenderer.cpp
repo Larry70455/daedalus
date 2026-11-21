@@ -83,6 +83,9 @@ extern void sceGuSetMatrix(int type, const ScePspFMatrix4 * mtx);
 //   Allocate vertices whose lifetime must extend beyond the current scope.
 //   On OSX we just use malloc, though we could use a scratch allocator to simplify.
 //   On PSP we again use sceGuGetMemory.
+#ifdef DAEDALUS_PSP
+void * PSP_AllocFrameVertices( u32 bytes );
+#endif
 struct TempVerts
 {
 	TempVerts()
@@ -102,7 +105,10 @@ struct TempVerts
 	{
 		u32 bytes = count * sizeof(DaedalusVtx);
 #ifdef DAEDALUS_PSP
-		Verts = static_cast<DaedalusVtx*>(sceGuGetMemory(bytes));
+		// Cached frame vertex memory if available (see PSP_AllocFrameVertices)
+		Verts = static_cast<DaedalusVtx*>(PSP_AllocFrameVertices(bytes));
+		if( Verts == nullptr )
+			Verts = static_cast<DaedalusVtx*>(sceGuGetMemory(bytes));
 #endif
 #if defined(DAEDALUS_GL) || defined(DAEDALUS_CTR) || defined(DAEDALUS_GLES)
 		Verts = static_cast<DaedalusVtx*>(malloc(bytes));
