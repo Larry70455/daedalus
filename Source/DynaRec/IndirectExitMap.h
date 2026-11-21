@@ -39,6 +39,10 @@ class CIndirectExitMap
 		// Generated code reads these two words directly, so keep them first.
 		u32						mLastAddress;
 		const void *			mLastTarget;
+		// The one before (a function returning to two callers in turn hits
+		// one of the two). Read by generated code right after the two above.
+		u32						mPrevAddress;
+		const void *			mPrevTarget;
 
 	private:
 		const CFragmentCache *	mpCache;

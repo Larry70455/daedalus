@@ -1438,12 +1438,21 @@ void CCodeGeneratorPSP::GenerateIndirectExitCode( u32 num_instructions, CIndirec
 
 		// Cache check (A2 = target)
 		CCodeLabel check_label( GetAssemblyBuffer()->GetLabel() );
-		const s16 target_offset = s16( reinterpret_cast< const u8 * >( &p_map->mLastTarget ) - reinterpret_cast< const u8 * >( &p_map->mLastAddress ) );
-		LoadConstant( PspReg_A1, reinterpret_cast< s32 >( &p_map->mLastAddress ) );
+		const u8 * map_base = reinterpret_cast< const u8 * >( &p_map->mLastAddress );
+		const s16 target_offset = s16( reinterpret_cast< const u8 * >( &p_map->mLastTarget ) - map_base );
+		const s16 prev_address_offset = s16( reinterpret_cast< const u8 * >( &p_map->mPrevAddress ) - map_base );
+		const s16 prev_target_offset = s16( reinterpret_cast< const u8 * >( &p_map->mPrevTarget ) - map_base );
+		LoadConstant( PspReg_A1, reinterpret_cast< s32 >( map_base ) );
 		LW( PspReg_V0, PspReg_A1, 0 );
-		CJumpLocation miss( BNE( PspReg_V0, PspReg_A2, CCodeLabel( nullptr ), true ) );
-		LW( PspReg_V0, PspReg_A1, target_offset );
-		JR( PspReg_V0, true );
+		CJumpLocation try_prev( BNE( PspReg_V0, PspReg_A2, CCodeLabel( nullptr ), false ) );
+		LW( PspReg_V1, PspReg_A1, target_offset );		// delay slot
+		JR( PspReg_V1, true );
+		// The entry before the last one (two callers in turn)
+		PatchJumpLong( try_prev, GetAssemblyBuffer()->GetLabel() );
+		LW( PspReg_V0, PspReg_A1, prev_address_offset );
+		CJumpLocation miss( BNE( PspReg_V0, PspReg_A2, CCodeLabel( nullptr ), false ) );
+		LW( PspReg_V1, PspReg_A1, prev_target_offset );	// delay slot
+		JR( PspReg_V1, true );
 
 		// Miss: look it up (and remember it); back to the dispatcher if not compiled
 		PatchJumpLong( miss, GetAssemblyBuffer()->GetLabel() );

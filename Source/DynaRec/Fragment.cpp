@@ -251,6 +251,8 @@ void	CFragment::ResetIndirectExitCache()
 	{
 		mpIndirectExitMap->mLastAddress = 0;
 		mpIndirectExitMap->mLastTarget = nullptr;
+		mpIndirectExitMap->mPrevAddress = 0;
+		mpIndirectExitMap->mPrevTarget = nullptr;
 	}
 }
 
