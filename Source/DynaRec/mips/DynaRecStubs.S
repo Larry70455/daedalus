@@ -30,6 +30,8 @@
 
 	.global _EnterDynaRec
 	.global _ReturnFromDynaRec
+	.global _DynaSyncOut
+	.global _SyncAndReturnFromDynaRec
 	.global _DirectExitCheckNoDelay
 	.global _DirectExitCheckDelay
 	.global _IndirectExitCheck
@@ -120,6 +122,7 @@ _EnterDynaRec:
 
 	or		$s7, $a2, $0	# Read address table
 	or		$s6, $a3, $0	# Upper bound
+	lw		$s5, _Events($a1)	# Event countdown lives in s5 while generated code runs (see _DynaSyncOut)
 
 	jr		$a0				# Jump to our target function
 	or		$fp, $a1, $0	# set frame pointer to Emulated CPU registers
@@ -148,6 +151,7 @@ _ReturnFromDynaRecIfStuffToDo:
 #	nop
 
 #######################################################################################
+#	Every path that gets here has the counters in memory (see _DynaSyncOut)
 #
 _ReturnFromDynaRec:
 	lw		$ra, 0($sp)		# Restore our return address
@@ -164,6 +168,29 @@ _ReturnFromDynaRec:
 	addiu	$sp, $sp, +40
 
 #######################################################################################
+#	While generated code runs, the countdown to the next event (Events[0].mCount)
+#	is kept in s5 and COUNT in memory is not updated at fragment exits.
+#	_DynaSyncOut adds the cycles run since the last sync (memory countdown - s5)
+#	to COUNT and stores s5 to the countdown, so C code sees exact values.
+#	Uses v0, v1. Generated code reloads s5 from memory after calling C.
+#
+_DynaSyncOut:
+	lw		$v0, _Events($fp)		# countdown at the last sync
+	lw		$v1, _C0_Count($fp)		# COUNT at the last sync
+	subu	$v0, $v0, $s5			# cycles run since then
+	addu	$v1, $v1, $v0
+	sw		$v1, _C0_Count($fp)
+	jr		$ra
+	sw		$s5, _Events($fp)
+
+_SyncAndReturnFromDynaRec:
+	jal		_DynaSyncOut
+	nop
+	j		_ReturnFromDynaRec
+	nop
+
+
+#######################################################################################
 #	Check if we need to exit the dynarec system and jump out as necessary.
 #	If we are ok to continue, this returns control to the calling code.
 #	Calling this function updates the COUNT register with the specified number of cycles.
@@ -171,19 +198,13 @@ _ReturnFromDynaRec:
 #	a1	- exit pc
 _DirectExitCheckNoDelay:
 
-	# The code below corresponds to CPU_UpdateCounter
-	lw		$v0, _C0_Count($fp)		# COUNT register
-	lw		$v1, _Events($fp)		# Events[0].mCount
-
-	addu	$v0, $v0, $a0		# COUNT + ops_executed
-	sw		$v0, _C0_Count($fp)		# COUNT = COUNT + ops_executed
-
+	# The code below corresponds to CPU_UpdateCounter (COUNT follows at the next sync)
 	sw		$a1, _CurrentPC($fp) 	# CurrentPC
 	sw		 $0, _Delay($fp)		# Delay = NO_DELAY
 
-	subu	$v1, $v1, $a0		# Events[0].mCount - ops_executed
-	blez	$v1, _DirectExitCheckCheckCount
-	sw		$v1, _Events($fp)		# Events[0].mCount = Events[0].mCount - ops_executed
+	subu	$s5, $s5, $a0		# Events[0].mCount - ops_executed
+	blez	$s5, _DirectExitCheckCheckCount
+	nop
 
 	jr		$ra					# Return back to caller
 	nop
@@ -197,21 +218,15 @@ _DirectExitCheckNoDelay:
 #	a2	- target pc
 _DirectExitCheckDelay:
 
-	# The code below corresponds to CPU_UpdateCounter
-	lw		$v0, _C0_Count($fp)		# COUNT register
-	lw		$v1, _Events($fp)		# Events[0].mCount
-
-	addu	$v0, $v0, $a0		# COUNT + ops_executed
-	sw		$v0, _C0_Count($fp)		# COUNT = COUNT + ops_executed
-
+	# The code below corresponds to CPU_UpdateCounter (COUNT follows at the next sync)
 	sw		$a1, _CurrentPC($fp) 	# CurrentPC
 	sw		$a2, _TargetPC($fp) 	# TargetPC
 	li		$v0, 1				# EXEC_DELAY
 	sw		$v0, _Delay($fp)		# Delay
 
-	subu	$v1, $v1, $a0		# Events[0].mCount - ops_executed
-	blez	$v1, _DirectExitCheckCheckCount
-	sw		$v1, _Events($fp)		# Events[0].mCount = Events[0].mCount - ops_executed
+	subu	$s5, $s5, $a0		# Events[0].mCount - ops_executed
+	blez	$s5, _DirectExitCheckCheckCount
+	nop
 
 	jr		$ra
 	nop
@@ -221,8 +236,11 @@ _DirectExitCheckDelay:
 #
 _DirectExitCheckCheckCount:
 	or		$s0, $ra, $0		# Keep track of return addresss
+	jal		_DynaSyncOut
+	nop
 	jal		CPU_HANDLE_COUNT_INTERRUPT
 	nop
+	lw		$s5, _Events($fp)	# the event queue changed
 
 	lw		$v0, _StuffToDo($fp)		# StuffToDo
 	bne		$v0, $0, _ReturnFromDynaRec
@@ -242,8 +260,16 @@ _IndirectExitCheck:
 
 	# Can avoid these until _ReturnFromDynaRec?
 	sw		$a2, _CurrentPC($fp) 	# CurrentPC
-	jal		CPU_UpdateCounter	# a0 holds instructions executed
 	sw		$0,  _Delay($fp)		# Delay (NO_DELAY)
+	subu	$s5, $s5, $a0		# as CPU_UpdateCounter( a0 )
+	jal		_DynaSyncOut		# COUNT and the countdown to memory
+	nop
+	bgtz	$s5, 1f				# no event due
+	nop
+	jal		CPU_HANDLE_COUNT_INTERRUPT
+	nop
+	lw		$s5, _Events($fp)	# the event queue changed
+1:
 
 	lw		$v0, _StuffToDo($fp)		# StuffToDo
 	bne		$v0, $0, _ReturnFromDynaRec

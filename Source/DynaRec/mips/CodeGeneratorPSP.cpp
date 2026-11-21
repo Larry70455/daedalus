@@ -108,6 +108,7 @@ extern "C" { u64 _FloatToDouble( u32 _float); }	//Uses CPU to pass f64/32 thats 
 extern "C" { u32 _DoubleToFloat( u64 _double); }	//Uses CPU to pass f64/32 thats why its maskerading as u64/32 //Corn
 
 extern "C" { void _ReturnFromDynaRec(); }
+extern "C" { void _DynaSyncOut(); void _SyncAndReturnFromDynaRec(); }
 extern "C" { void _DirectExitCheckNoDelay( u32 instructions_executed, u32 exit_pc ); }
 extern "C" { void _DirectExitCheckDelay( u32 instructions_executed, u32 exit_pc, u32 target_pc ); }
 extern "C" { void _IndirectExitCheck( u32 instructions_executed, CIndirectExitMap * p_map, u32 target_pc ); }
@@ -298,7 +299,7 @@ const EPspReg	gRegistersToUseForCaching[] =
 	PspReg_S2,
 	PspReg_S3,
 	PspReg_S4,
-	PspReg_S5,
+//	PspReg_S5,		// Event countdown (Events[0].mCount) while generated code runs, see DAEDALUS_COUNTER_REG
 //	PspReg_S6,		// Memory upper bound
 //	PspReg_S7,		// Used for g_pu8RamBase - 0x80000000
 //	PspReg_S8,		// Used for base register (&gCPUState)
@@ -1234,8 +1235,6 @@ CJumpLocation CCodeGeneratorPSP::GenerateExitCode( u32 exit_address, u32 jump_ad
 		MaterializeAllHi( mRegisterCache );
 
 		// Check if we're ok to continue, without flushing any registers
-		GetVar( PspReg_V0, &gCPUState.CPUControl[C0_COUNT]._u32 );
-		GetVar( PspReg_A0, (const u32*)&gCPUState.Events[0].mCount );
 
 		//
 		//	Pull in any registers which may have been flushed for whatever reason.
@@ -1260,23 +1259,20 @@ CJumpLocation CCodeGeneratorPSP::GenerateExitCode( u32 exit_address, u32 jump_ad
 
 		// Assuming we don't need to set CurrentPC/Delay flags before we branch to the top..
 		//
-		ADDIU( PspReg_V0, PspReg_V0, num_instructions );
-		SetVar( &gCPUState.CPUControl[C0_COUNT]._u32, PspReg_V0 );
-
-		//
 		//	If the event counter is still positive, just jump directly to the top of our loop
 		//
-		ADDIU( PspReg_A0, PspReg_A0, -s16(num_instructions) );
-		BGTZ( PspReg_A0, mLoopTop, false );
-		SetVar( (u32*)&gCPUState.Events[0].mCount, PspReg_A0 );	// ASSUMES store is done in just a single op.
+		ADDIU( PspReg_S5, PspReg_S5, -s16(num_instructions) );
+		BGTZ( PspReg_S5, mLoopTop, true );
 
 		FlushAllRegisters( mRegisterCache, true );
 
 		SetVar( &gCPUState.CurrentPC, exit_address );
-		JAL( CCodeLabel( reinterpret_cast< const void * >( CPU_HANDLE_COUNT_INTERRUPT ) ), false );
 		SetVar( &gCPUState.Delay, NO_DELAY );	// ASSUMES store is done in just a single op.
+		SyncCountersOut();
+		JAL( CCodeLabel( reinterpret_cast< const void * >( CPU_HANDLE_COUNT_INTERRUPT ) ), true );
+		SyncCountersIn();
 
-		J( CCodeLabel( reinterpret_cast< const void * >( _ReturnFromDynaRec ) ), true );
+		J( CCodeLabel( reinterpret_cast< const void * >( _SyncAndReturnFromDynaRec ) ), true );
 
 		//
 		//	Return an invalid jump location to indicate we've handled our own linking.
@@ -1295,13 +1291,8 @@ CJumpLocation CCodeGeneratorPSP::GenerateExitCode( u32 exit_address, u32 jump_ad
 		// written when control really goes back to the dispatcher (event due,
 		// or next fragment not compiled yet); fragments linked to each other
 		// never read them.
-		GetVar( PspReg_V0, &gCPUState.CPUControl[C0_COUNT]._u32 );
-		GetVar( PspReg_V1, (const u32*)&gCPUState.Events[0].mCount );
-		ADDIU( PspReg_V0, PspReg_V0, num_instructions );
-		SetVar( &gCPUState.CPUControl[C0_COUNT]._u32, PspReg_V0 );
-		ADDIU( PspReg_V1, PspReg_V1, -s16( num_instructions ) );
-		CJumpLocation to_event( BLEZ( PspReg_V1, CCodeLabel( nullptr ), false ) );
-		SetVar( (u32*)&gCPUState.Events[0].mCount, PspReg_V1 );	// delay slot (single store)
+		ADDIU( PspReg_S5, PspReg_S5, -s16( num_instructions ) );	// event countdown, see SyncCountersOut
+		CJumpLocation to_event( BLEZ( PspReg_S5, CCodeLabel( nullptr ), true ) );
 
 		// Continue with the next fragment (patched in when it is compiled)
 		CCodeLabel continue_label( GetAssemblyBuffer()->GetLabel() );
@@ -1312,10 +1303,12 @@ CJumpLocation CCodeGeneratorPSP::GenerateExitCode( u32 exit_address, u32 jump_ad
 		LoadConstant( PspReg_A1, exit_address );
 		SetVar( &gCPUState.CurrentPC, PspReg_A1 );
 		SetVar( &gCPUState.Delay, NO_DELAY );
+		SyncCountersOut();
 		JAL( CCodeLabel( reinterpret_cast< const void * >( CPU_HANDLE_COUNT_INTERRUPT ) ), true );
+		SyncCountersIn();
 		GetVar( PspReg_V0, (const u32*)&gCPUState.StuffToDo );
 		BEQ( PspReg_V0, PspReg_R0, continue_label, true );
-		J( CCodeLabel( reinterpret_cast< const void * >( _ReturnFromDynaRec ) ), true );
+		J( CCodeLabel( reinterpret_cast< const void * >( _SyncAndReturnFromDynaRec ) ), true );
 
 		if( !next_fragment.IsSet() )
 		{
@@ -1324,7 +1317,7 @@ CJumpLocation CCodeGeneratorPSP::GenerateExitCode( u32 exit_address, u32 jump_ad
 			LoadConstant( PspReg_A1, exit_address );
 			SetVar( &gCPUState.CurrentPC, PspReg_A1 );
 			SetVar( &gCPUState.Delay, NO_DELAY );
-			J( CCodeLabel( reinterpret_cast< const void * >( _ReturnFromDynaRec ) ), true );
+			J( CCodeLabel( reinterpret_cast< const void * >( _SyncAndReturnFromDynaRec ) ), true );
 			PatchJumpLong( jump_to_next_fragment, unlinked );
 		}
 		return jump_to_next_fragment;
@@ -1372,7 +1365,7 @@ CJumpLocation CCodeGeneratorPSP::GenerateExitCode( u32 exit_address, u32 jump_ad
 	// Patch up the exit jump if the target hasn't been compiled yet
 	if( !next_fragment.IsSet() )
 	{
-		PatchJumpLong( jump_to_next_fragment, CCodeLabel( reinterpret_cast< const void * >( _ReturnFromDynaRec ) ) );
+		PatchJumpLong( jump_to_next_fragment, CCodeLabel( reinterpret_cast< const void * >( _SyncAndReturnFromDynaRec ) ) );
 	}
 	return jump_to_next_fragment;
 
@@ -1411,14 +1404,9 @@ void CCodeGeneratorPSP::GenerateIndirectExitCode( u32 num_instructions, CIndirec
 		// on every exit (not only when an event fires), because earlier code
 		// in the fragment (e.g. a hardware register write) may have set it.
 		GetVar( PspReg_A2, &gCPUState.TargetPC );
-		GetVar( PspReg_V0, &gCPUState.CPUControl[C0_COUNT]._u32 );
-		GetVar( PspReg_V1, (const u32*)&gCPUState.Events[0].mCount );
-		ADDIU( PspReg_V0, PspReg_V0, num_instructions );
-		SetVar( &gCPUState.CPUControl[C0_COUNT]._u32, PspReg_V0 );
-		ADDIU( PspReg_V1, PspReg_V1, -s16( num_instructions ) );
-		CJumpLocation to_event( BLEZ( PspReg_V1, CCodeLabel( nullptr ), false ) );
-		SetVar( (u32*)&gCPUState.Events[0].mCount, PspReg_V1 );	// delay slot (single store)
-		GetVar( PspReg_V1, (const u32*)&gCPUState.StuffToDo );
+		ADDIU( PspReg_S5, PspReg_S5, -s16( num_instructions ) );	// event countdown, see SyncCountersOut
+		CJumpLocation to_event( BLEZ( PspReg_S5, CCodeLabel( nullptr ), false ) );
+		GetVar( PspReg_V1, (const u32*)&gCPUState.StuffToDo );	// delay slot (harmless if taken)
 		CJumpLocation to_stuff( BNE( PspReg_V1, PspReg_R0, CCodeLabel( nullptr ), true ) );
 
 		// Cache check (A2 = target)
@@ -1441,7 +1429,7 @@ void CCodeGeneratorPSP::GenerateIndirectExitCode( u32 num_instructions, CIndirec
 		JR( PspReg_V0, true );
 		CCodeLabel dispatcher_label( GetAssemblyBuffer()->GetLabel() );
 		PatchJumpLong( not_compiled, dispatcher_label );
-		J( CCodeLabel( reinterpret_cast< const void * >( _ReturnFromDynaRec ) ), true );
+		J( CCodeLabel( reinterpret_cast< const void * >( _SyncAndReturnFromDynaRec ) ), true );
 
 		// StuffToDo already set: record where to resume and leave
 		PatchJumpLong( to_stuff, GetAssemblyBuffer()->GetLabel() );
@@ -1453,7 +1441,9 @@ void CCodeGeneratorPSP::GenerateIndirectExitCode( u32 num_instructions, CIndirec
 		PatchJumpLong( to_event, GetAssemblyBuffer()->GetLabel() );
 		SetVar( &gCPUState.CurrentPC, PspReg_A2 );
 		SetVar( &gCPUState.Delay, NO_DELAY );
+		SyncCountersOut();
 		JAL( CCodeLabel( reinterpret_cast< const void * >( CPU_HANDLE_COUNT_INTERRUPT ) ), true );
+		SyncCountersIn();
 		GetVar( PspReg_V0, (const u32*)&gCPUState.StuffToDo );
 		BNE( PspReg_V0, PspReg_R0, dispatcher_label, true );
 		GetVar( PspReg_A2, &gCPUState.CurrentPC );
@@ -2166,6 +2156,32 @@ void	CCodeGeneratorPSP::SetBranchTarget( u32 target )
 	SetVar( &gCPUState.TargetPC, target );
 }
 
+//*****************************************************************************
+// Event countdown register
+//
+// While generated code runs, the countdown to the next event
+// (gCPUState.Events[0].mCount) lives in S5 instead of memory, and COUNT in
+// memory is only brought up to date when C code is about to run: fragment
+// exits are then "addiu s5, s5, -n; blez s5, event" instead of loading,
+// updating and storing both COUNT and the countdown (about 20% of all
+// executed generated instructions before). _EnterDynaRec loads S5.
+// SyncCountersOut (_DynaSyncOut, DynaRecStubs.S) adds the cycles run since
+// the last sync to COUNT and stores S5 to the countdown; it must come before
+// any call that may read or change COUNT or the event queue, and before
+// leaving through _ReturnFromDynaRec (use _SyncAndReturnFromDynaRec).
+// SyncCountersIn reloads S5 after such a call. C code therefore always sees
+// exactly the same COUNT and event values as before.
+//*****************************************************************************
+void	CCodeGeneratorPSP::SyncCountersOut()
+{
+	JAL( CCodeLabel( reinterpret_cast< const void * >( _DynaSyncOut ) ), true );	// uses V0, V1, RA
+}
+
+void	CCodeGeneratorPSP::SyncCountersIn()
+{
+	GetVar( PspReg_S5, (const u32*)&gCPUState.Events[0].mCount );
+}
+
 // Move COUNT and the event countdown forward (before a call out of the
 // fragment) or back (after it returns) by the instructions this fragment has
 // already run. See DAEDALUS_EXACT_COUNT_READ. Uses (clobbers) t0 and t1.
@@ -2218,6 +2234,8 @@ void	CCodeGeneratorPSP::GenerateGenericR4300( OpCode op_code, CPU_Instruction p_
 	call_target = reinterpret_cast< const void * >( &PerfLog::FallbackThunk );
 #endif
 
+	SyncCountersOut();	// the interpreter may read COUNT or change the event queue
+
 #if DAEDALUS_EXACT_COUNT_READ
 	// A COP0 instruction run by the interpreter (MTC0 to COMPARE, COUNT, SR..)
 	// may read COUNT or schedule an event relative to "now". Inside a fragment
@@ -2253,6 +2271,7 @@ void	CCodeGeneratorPSP::GenerateGenericR4300( OpCode op_code, CPU_Instruction p_
 		GenerateCountAdjust( false, PspReg_V0, PspReg_V1 );
 	}
 #endif
+	SyncCountersIn();
 }
 
 
@@ -2261,7 +2280,9 @@ void	CCodeGeneratorPSP::GenerateGenericR4300( OpCode op_code, CPU_Instruction p_
 
 CJumpLocation CCodeGeneratorPSP::ExecuteNativeFunction( CCodeLabel speed_hack, bool check_return )
 {
+	SyncCountersOut();
 	JAL( speed_hack, true );
+	SyncCountersIn();
 
 	if( check_return )
 		return BEQ(PspReg_V0, PspReg_R0, CCodeLabel(nullptr), true);
@@ -2332,6 +2353,7 @@ void	CCodeGeneratorPSP::GenerateSlowLoad( u32 current_pc, EPspReg psp_dst, EPspR
 	{
 		OR( PspReg_A0, reg_address, PspReg_R0 );
 	}
+	SyncCountersOut();	// A0 holds the address (not touched)
 #if DAEDALUS_EXACT_COUNT_READ
 	GenerateCountAdjust( true, PspReg_V0, PspReg_V1 );	// A0 holds the address
 #endif
@@ -2353,6 +2375,7 @@ void	CCodeGeneratorPSP::GenerateSlowLoad( u32 current_pc, EPspReg psp_dst, EPspR
 #if DAEDALUS_EXACT_COUNT_READ
 	GenerateCountAdjust( false, PspReg_A0, PspReg_A1 );	// V0 holds the value read
 #endif
+	SyncCountersIn();
 
 	// Restore all registers BEFORE copying back final value
 	RestoreAllRegisters( mRegisterCache, current_regs );
@@ -2709,6 +2732,7 @@ inline void	CCodeGeneratorPSP::GenerateSlowStore( u32 current_pc, EPspReg psp_sr
 	{
 		OR( PspReg_A1, psp_src, PspReg_R0 );
 	}
+	SyncCountersOut();	// A0, A1 hold address and value (not touched)
 #if DAEDALUS_EXACT_COUNT_READ
 	GenerateCountAdjust( true, PspReg_V0, PspReg_V1 );	// A0, A1 hold address and value
 #endif
@@ -2730,6 +2754,7 @@ inline void	CCodeGeneratorPSP::GenerateSlowStore( u32 current_pc, EPspReg psp_sr
 #if DAEDALUS_EXACT_COUNT_READ
 	GenerateCountAdjust( false, PspReg_A0, PspReg_A1 );
 #endif
+	SyncCountersIn();
 
 	// Restore all registers BEFORE copying back final value
 	RestoreAllRegisters( mRegisterCache, current_regs );
@@ -2911,6 +2936,7 @@ inline void	CCodeGeneratorPSP::GenerateCACHE( EN64Reg base, s16 offset, u32 cach
 		FlushAllRegisters(mRegisterCache, true);
 		LoadRegister(PspReg_A0, base, 0);
 		ADDI(PspReg_A0, PspReg_A0, offset);
+		SyncCountersOut();
 		if( action == 0 )
 		{
 			JAL( CCodeLabel( reinterpret_cast< const void * >( CPU_InvalidateICacheIndexed ) ), true );
@@ -2920,6 +2946,7 @@ inline void	CCodeGeneratorPSP::GenerateCACHE( EN64Reg base, s16 offset, u32 cach
 			JAL( CCodeLabel( reinterpret_cast< const void * >( CPU_InvalidateICacheRange ) ), false );
 			ORI(PspReg_A1, PspReg_R0, 0x20);
 		}
+		SyncCountersIn();
 	}
 	//else
 	//{
@@ -5693,6 +5720,8 @@ inline void	CCodeGeneratorPSP::GenerateMFC0( EN64Reg rt, u32 fs )
 	// Never seen this to happen, no reason to bother to handle it
 	DAEDALUS_ASSERT( fs != C0_RAND, "Reading MFC0 random register is unhandled");
 	#endif
+	if( fs == C0_COUNT )
+		SyncCountersOut();	// COUNT in memory is behind the event countdown register
 	EPspReg reg_dst( GetRegisterNoLoadLo( rt, PspReg_V0 ) );
 
 	GetVar( reg_dst, &gCPUState.CPUControl[ fs ]._u32 );

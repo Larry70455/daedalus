@@ -280,6 +280,8 @@ private:
 
 
 				void				GenerateGenericR4300( OpCode op_code, CPU_Instruction p_instruction );
+				void				SyncCountersOut();
+				void				SyncCountersIn();
 				void				GenerateCountAdjust( bool forward, EPspReg t0, EPspReg t1 );
 				using ReadMemoryFunction = u32 (*)(u32 address, u32 current_pc );
 				using WriteMemoryFunction = void (*)( u32 address, u32 value, u32 current_pc );
