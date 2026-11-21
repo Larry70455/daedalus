@@ -90,6 +90,7 @@ IAdvancedOptionsScreen::IAdvancedOptionsScreen( CUIContext * p_context, const Ro
 	}
 
 	mElements.Add( std::make_unique<CBoolSetting>( &mRomPreferences.MemoryAccessOptimisation, "Dynarec Memory Optimisation", "Enable for speed-up (WARNING, can cause instability and/or crash on certain ROMs).", "Enabled", "Disabled" ) );
+	mElements.Add( std::make_unique<CBoolSetting>( &mRomPreferences.Dynarec32BitMode, "Dynarec 32 bit Registers", "Faster: keeps only the low 32 bits of N64 registers. Disable if a game misbehaves (very few games use 64 bit integer maths).", "Enabled", "Disabled" ) );
 	mElements.Add( std::make_unique<CBoolSetting>( &mRomPreferences.DynarecLoopOptimisation, "Dynarec Loop Optimisation", "Enable for speed-up (WARNING, quite unstable and can cause instability and/or crash on many ROMs).", "Enabled", "Disabled" ) );
 	mElements.Add( std::make_unique<CBoolSetting>( &mRomPreferences.DynarecDoublesOptimisation, "Dynarec Doubles Optimisation", "Enable for speed-up (WARNING, works on most but not all ROMs).", "Enabled", "Disabled" ) );
 	mElements.Add( std::make_unique<CBoolSetting>( &mRomPreferences.CleanSceneEnabled, "Clean Scene", "Force clear of frame buffer before drawing any primitives (Use it to clear out garbage on screen)", "Enabled", "Disabled" ) );

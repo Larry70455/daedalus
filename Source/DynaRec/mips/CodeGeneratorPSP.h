@@ -257,6 +257,7 @@ private:
 					URO_HI_CLEAR,			// Clear hi bits
 				};
 				*/
+				void				ForgetHi( EN64Reg n64_reg );
 				void				UpdateRegister( EN64Reg n64_reg, EPspReg psp_reg, bool options );
 
 

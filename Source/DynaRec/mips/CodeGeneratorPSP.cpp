@@ -861,6 +861,12 @@ void CCodeGeneratorPSP::SetRegister64( EN64Reg n64_reg, s32 lo_value, s32 hi_val
 inline void CCodeGeneratorPSP::SetRegister32s( EN64Reg n64_reg, s32 value )
 {
 	//SetRegister64( n64_reg, value, value >= 0 ? 0 : 0xffffffff );
+	if( gDynarec32BitMode )
+	{
+		SetRegister( n64_reg, 0, value );
+		ForgetHi( n64_reg );
+		return;
+	}
 	SetRegister64( n64_reg, value, value >> 31 );
 }
 
@@ -881,6 +887,34 @@ inline void CCodeGeneratorPSP::SetRegister( EN64Reg n64_reg, u32 lo_hi_idx, u32 
 
 //
 
+//*****************************************************************************
+// 32 bit register mode (gDynarec32BitMode, "Dynarec 32 bit Registers")
+//
+// Almost every N64 instruction writes a 32 bit result sign extended to 64
+// bits, and almost no game ever uses the upper half. Keeping it costs an SRA
+// and a store per register write-back: about 15% of all executed generated
+// instructions in a Pokemon Stadium 2 battle, and the matching share of code
+// size, which on the PSP means instruction cache misses.
+//
+// In 32 bit mode, 32 bit results are not stored with their upper half: the
+// upper half in memory keeps whatever an earlier 64 bit instruction left
+// there. Results of 64 bit instructions (DSLL32, DADDU, LD, ...) are stored
+// in full as before, so 64 bit maths built from them (libultra's 64 bit
+// multiply/divide) still works. Branches and SLT style comparisons look at
+// the low 32 bits only, in the dynarec (as before) and, in this mode, in the
+// interpreter too. A game that runs a 64 bit instruction on a register last
+// written by a 32 bit instruction in another fragment gets a stale upper
+// half, so the option can be turned off per game.
+//*****************************************************************************
+void CCodeGeneratorPSP::ForgetHi( EN64Reg n64_reg )
+{
+	mRegisterCache.SetHiSignExtendPending( n64_reg, false );
+	mRegisterCache.ClearKnownValue( n64_reg, 1 );
+	mRegisterCache.MarkAsDirty( n64_reg, 1, false );
+	if( mRegisterCache.IsCached( n64_reg, 1 ) )
+		mRegisterCache.MarkAsValid( n64_reg, 1, false );
+}
+
 void CCodeGeneratorPSP::UpdateRegister( EN64Reg n64_reg, EPspReg psp_reg, bool options )
 {
 	//if(n64_reg == N64Reg_R0) return;	//Try to modify R0!!!
@@ -892,6 +926,11 @@ void CCodeGeneratorPSP::UpdateRegister( EN64Reg n64_reg, EPspReg psp_reg, bool o
 
 	if( options == URO_HI_SIGN_EXTEND )
 	{
+		if( gDynarec32BitMode )
+		{
+			ForgetHi( n64_reg );	// 32 bit mode: the upper half is never stored
+			return;
+		}
 #if DAEDALUS_LAZY_SIGN_EXTEND
 		if( mRegisterCache.IsCached( n64_reg, 0 ) && !mRegisterCache.IsCached( n64_reg, 1 ) )
 		{
@@ -1156,7 +1195,9 @@ void	CCodeGeneratorPSP::RestoreAllRegisters( CN64RegisterCachePSP & current_cach
 		}
 		if( new_cache.IsValid( n64_reg, 1 ) && !current_cache.IsValid( n64_reg, 1 ) )
 		{
-			GetVar( new_cache.GetCachedReg( n64_reg, 1 ), &gGPR[ n64_reg ]._u32_1 );
+			{
+				GetVar( new_cache.GetCachedReg( n64_reg, 1 ), &gGPR[ n64_reg ]._u32_1 );
+			}
 		}
 	}
 

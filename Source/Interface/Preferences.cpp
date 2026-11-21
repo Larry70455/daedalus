@@ -294,6 +294,10 @@ bool IPreferences::OpenPreferencesFile( const std::filesystem::path  &filename )
 		{
 			preferences.ControllerIndex = CInputManager::Get()->GetConfigurationFromName( property->GetValue() );
 		}
+		if( section->FindProperty( "Dynarec32BitMode", &property ) )
+		{
+			preferences.Dynarec32BitMode = property->GetBooleanValue( true );
+		}
 		if( section->FindProperty( "MemoryAccessOptimisation", &property ) )
 		{
 			preferences.MemoryAccessOptimisation = property->GetBooleanValue( false );
@@ -322,6 +326,7 @@ fh << "PatchesEnabled=" << preferences.PatchesEnabled << "\n";
 fh << "SpeedSyncEnabled=" << preferences.SpeedSyncEnabled << "\n";
 fh << "DynarecEnabled=" << preferences.DynarecEnabled << "\n";
 fh << "DynarecLoopOptimisation=" << preferences.DynarecLoopOptimisation << "\n";
+fh << "Dynarec32BitMode=" << preferences.Dynarec32BitMode << "\n";
 fh << "DynarecDoublesOptimisation=" << preferences.DynarecDoublesOptimisation << "\n";
 fh << "DoubleDisplayEnabled=" << preferences.DoubleDisplayEnabled << "\n";
 fh << "CleanSceneEnabled=" << preferences.CleanSceneEnabled << "\n";
@@ -445,6 +450,7 @@ SRomPreferences::SRomPreferences()
 	:	PatchesEnabled( true )
 	,	DynarecEnabled( true )
 	,	DynarecLoopOptimisation( true )
+	,	Dynarec32BitMode( true )
 	,	DynarecDoublesOptimisation( true )
 	,	DoubleDisplayEnabled( true )
 	,	CleanSceneEnabled( false )
@@ -492,6 +498,7 @@ void SRomPreferences::Apply() const
 	gOSHooksEnabled             = PatchesEnabled;
 	gSpeedSyncEnabled           = SpeedSyncEnabled;
 	gDynarecEnabled             = g_ROM.settings.DynarecSupported && DynarecEnabled;
+	gDynarec32BitMode			= Dynarec32BitMode;
 	gDynarecLoopOptimisation	= DynarecLoopOptimisation;	// && g_ROM.settings.DynarecLoopOptimisation;
 	gDynarecDoublesOptimisation	= g_ROM.settings.DynarecDoublesOptimisation || DynarecDoublesOptimisation;
 	gDoubleDisplayEnabled       = g_ROM.settings.DoubleDisplayEnabled && DoubleDisplayEnabled; // I don't know why DD won't disabled if we set ||

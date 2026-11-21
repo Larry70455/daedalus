@@ -29,6 +29,7 @@
 
 // Per-ROM config
 extern bool gDynarecEnabled;			// Use dynamic recompilation
+extern bool gDynarec32BitMode;	// Dynarec treats N64 registers as 32 bit (see CodeGeneratorPSP: DAEDALUS 32 bit mode)
 extern bool gDynarecLoopOptimisation;	// Enable the dynarec loop optmisation
 extern bool gDynarecDoublesOptimisation;	// Enable the dynarec loop optmisation
 extern bool gOSHooksEnabled;			// Apply os-hooks

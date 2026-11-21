@@ -80,6 +80,14 @@ enum ERoundingMode
 	RM_FLOOR,
 	RM_NUM_MODES,
 };
+// Register values for branch and SLT comparisons. In the dynarec's 32 bit
+// register mode (gDynarec32BitMode) the upper halves of registers written by
+// 32 bit instructions are not kept, so comparisons use the sign extended low
+// half, exactly as the dynarec's own branches do.
+static inline bool R4300_Compare32() { return gDynarec32BitMode & gDynarecEnabled; }
+#define R4300_CMP_S64( r )	( R4300_Compare32() ? (s64)gGPR[ r ]._s32_0 : gGPR[ r ]._s64 )
+#define R4300_CMP_U64( r )	( R4300_Compare32() ? (u64)(s64)gGPR[ r ]._s32_0 : gGPR[ r ]._u64 )
+
 static ERoundingMode	gRoundingMode( RM_ROUND );
 
 #if defined(DAEDALUS_PSP)
@@ -654,7 +662,7 @@ static void  R4300_BEQ( R4300_CALL_SIGNATURE ) 		// Branch on Equal
 {
 	R4300_CALL_MAKE_OP( op_code );
 
-	if ( gGPR[op_code.rs]._u64 == gGPR[op_code.rt]._u64 )
+	if ( R4300_CMP_U64( op_code.rs ) == R4300_CMP_U64( op_code.rt ) )
 	{
 		s16 offset = (s16)op_code.immediate;
 		u32 pc = gCPUState.CurrentPC;
@@ -670,7 +678,7 @@ static void  R4300_BNE( R4300_CALL_SIGNATURE )             // Branch on Not Equa
 	R4300_CALL_MAKE_OP( op_code );
 
 	//branch if rs <> rt
-	if ( gGPR[op_code.rs]._u64 != gGPR[op_code.rt]._u64 )
+	if ( R4300_CMP_U64( op_code.rs ) != R4300_CMP_U64( op_code.rt ) )
 	{
 		s16 offset = (s16)op_code.immediate;
 		u32 pc = gCPUState.CurrentPC;
@@ -685,7 +693,7 @@ static void  R4300_BLEZ( R4300_CALL_SIGNATURE ) 			// Branch on Less than of Equ
 {
 	R4300_CALL_MAKE_OP( op_code );
 	//branch if rs <= 0
-	if (gGPR[op_code.rs]._s64 <= 0)
+	if (R4300_CMP_S64( op_code.rs ) <= 0)
 	{
 		s16 offset( (s16)op_code.immediate );
 		u32 pc( gCPUState.CurrentPC );
@@ -702,7 +710,7 @@ static void  R4300_BGTZ( R4300_CALL_SIGNATURE ) 			// Branch on Greater than Zer
 
 	//This compare needs to be 64bit! otherwise DK can go through walls (DK64)
 	//if (gGPR[op_code.rs]._s32_0 > 0)
-	if (gGPR[op_code.rs]._s64 > 0)
+	if (R4300_CMP_S64( op_code.rs ) > 0)
 	{
 		s16 offset{ (s16)op_code.immediate };
 		u32 pc{ gCPUState.CurrentPC };
@@ -742,7 +750,7 @@ static void  R4300_SLTI( R4300_CALL_SIGNATURE ) 			// Set on Less Than Immediate
 	R4300_CALL_MAKE_OP( op_code );
 
 	// Cast to s32s to ensure sign is taken into account
-	if (gGPR[op_code.rs]._s64 < (s64)(s32)(s16)op_code.immediate)
+	if (R4300_CMP_S64( op_code.rs ) < (s64)(s32)(s16)op_code.immediate)
 	{
 		gGPR[op_code.rt]._u64 = 1;
 	}
@@ -761,7 +769,7 @@ static void  R4300_SLTIU( R4300_CALL_SIGNATURE ) 		// Set on Less Than Immediate
 	R4300_CALL_MAKE_OP( op_code );
 
 	// Cast to s32s to ensure sign is taken into account
-	if (gGPR[op_code.rs]._u64 < (u64)(s64)(s32)(s16)op_code.immediate)
+	if (R4300_CMP_U64( op_code.rs ) < (u64)(s64)(s32)(s16)op_code.immediate)
 	{
 		gGPR[op_code.rt]._u64 = 1;
 	}
@@ -808,7 +816,7 @@ static void  R4300_BEQL( R4300_CALL_SIGNATURE ) 			// Branch on Equal Likely
 	R4300_CALL_MAKE_OP( op_code );
 
 	//branch if rs == rt
-	if ( gGPR[op_code.rs]._u64 == gGPR[op_code.rt]._u64 )
+	if ( R4300_CMP_U64( op_code.rs ) == R4300_CMP_U64( op_code.rt ) )
 	{
 		s16 offset( (s16)op_code.immediate );
 		u32 pc( gCPUState.CurrentPC );
@@ -829,7 +837,7 @@ static void  R4300_BNEL( R4300_CALL_SIGNATURE ) 			// Branch on Not Equal Likely
 	R4300_CALL_MAKE_OP( op_code );
 
 	//branch if rs <> rt
-	if ( gGPR[op_code.rs]._u64 != gGPR[op_code.rt]._u64 )
+	if ( R4300_CMP_U64( op_code.rs ) != R4300_CMP_U64( op_code.rt ) )
 	{
 		s16 offset = (s16)op_code.immediate;
 		u32 pc = gCPUState.CurrentPC;
@@ -849,7 +857,7 @@ static void  R4300_BLEZL( R4300_CALL_SIGNATURE ) 		// Branch on Less than or Equ
 	R4300_CALL_MAKE_OP( op_code );
 
 	//branch if rs <= 0
-	if ( gGPR[op_code.rs]._s64 <= 0 )
+	if ( R4300_CMP_S64( op_code.rs ) <= 0 )
 	{
 		s16 offset = (s16)op_code.immediate;
 		u32 pc = gCPUState.CurrentPC;
@@ -870,7 +878,7 @@ static void  R4300_BGTZL( R4300_CALL_SIGNATURE ) 		// Branch on Greater than Zer
 	R4300_CALL_MAKE_OP( op_code );
 
 	//branch if rs > 0
-	if ( gGPR[op_code.rs]._s64 > 0 )
+	if ( R4300_CMP_S64( op_code.rs ) > 0 )
 	{
 		//ToDo : SpeedHack?
 		u32	new_pc = gCPUState.CurrentPC + ((s32)(s16)op_code.immediate<<2) + 4;
@@ -1624,7 +1632,7 @@ static void  R4300_Special_SLT( R4300_CALL_SIGNATURE ) 				// Set on Less Than
 	R4300_CALL_MAKE_OP( op_code );
 
 	// Cast to s32s to ensure sign is taken into account
-	if ( gGPR[ op_code.rs ]._s64 < gGPR[ op_code.rt ]._s64 )
+	if ( R4300_CMP_S64( op_code.rs ) < R4300_CMP_S64( op_code.rt ) )
 	{
 		gGPR[ op_code.rd ]._u64 = 1;
 	}
@@ -1639,7 +1647,7 @@ static void  R4300_Special_SLTU( R4300_CALL_SIGNATURE ) 				// Set on Less Than 
 	R4300_CALL_MAKE_OP( op_code );
 
 	// Treated as unsigned....
-	if ( gGPR[ op_code.rs ]._u64 < gGPR[ op_code.rt ]._u64 )
+	if ( R4300_CMP_U64( op_code.rs ) < R4300_CMP_U64( op_code.rt ) )
 	{
 		gGPR[ op_code.rd ]._u64 = 1;
 	}
@@ -1742,7 +1750,7 @@ static void  R4300_RegImm_BLTZ( R4300_CALL_SIGNATURE ) 			// Branch on Less than
 	R4300_CALL_MAKE_OP( op_code );
 
 	//branch if rs < 0
-	if ( gGPR[ op_code.rs ]._s64 < 0 )
+	if ( R4300_CMP_S64( op_code.rs ) < 0 )
 	{
 		s16 offset= (s16)op_code.immediate;
 		u32 pc = gCPUState.CurrentPC;
@@ -1758,7 +1766,7 @@ static void  R4300_RegImm_BLTZL( R4300_CALL_SIGNATURE ) 			// Branch on Less tha
 	R4300_CALL_MAKE_OP( op_code );
 
 	//branch if rs < 0
-	if ( gGPR[ op_code.rs ]._s64 < 0 )
+	if ( R4300_CMP_S64( op_code.rs ) < 0 )
 	{
 		//ToDo: SpeedHack?
 		u32	new_pc = gCPUState.CurrentPC + ((s32)(s16)op_code.immediate<<2) + 4;
@@ -1781,7 +1789,7 @@ static void  R4300_RegImm_BLTZAL( R4300_CALL_SIGNATURE ) 		// Branch on Less tha
 	// Store return address
 	gGPR[REG_ra]._s64 = (s64)(s32)(gCPUState.CurrentPC + 8);		// Store return address
 
-	if ( gGPR[ op_code.rs ]._s64 < 0 )
+	if ( R4300_CMP_S64( op_code.rs ) < 0 )
 	{
 		//ToDo: SpeedHack?
 		u32	new_pc = gCPUState.CurrentPC + ((s32)(s16)op_code.immediate<<2) + 4;
@@ -1794,7 +1802,7 @@ static void  R4300_RegImm_BGEZ( R4300_CALL_SIGNATURE ) 			// Branch on Greater t
 	R4300_CALL_MAKE_OP( op_code );
 
 	//branch if rs >= 0
-	if ( gGPR[ op_code.rs ]._s64 >= 0 )
+	if ( R4300_CMP_S64( op_code.rs ) >= 0 )
 	{
 		s16 offset = (s16)op_code.immediate;
 		u32 pc = gCPUState.CurrentPC ;
@@ -1810,7 +1818,7 @@ static void  R4300_RegImm_BGEZL( R4300_CALL_SIGNATURE ) 			// Branch on Greater 
 	R4300_CALL_MAKE_OP( op_code );
 
 	//branch if rs >= 0
-	if ( gGPR[ op_code.rs ]._s64 >= 0 )
+	if ( R4300_CMP_S64( op_code.rs ) >= 0 )
 	{
 		//ToDO: SpeedHack?
 		u32	new_pc = gCPUState.CurrentPC + ((s32)(s16)op_code.immediate<<2) + 4;
@@ -1832,7 +1840,7 @@ static void  R4300_RegImm_BGEZAL( R4300_CALL_SIGNATURE ) 		// Branch on Greater 
 
 	gGPR[REG_ra]._s64 = (s64)(s32)(gCPUState.CurrentPC + 8);		// Store return address
 
-	if ( gGPR[ op_code.rs ]._s64 >= 0 )
+	if ( R4300_CMP_S64( op_code.rs ) >= 0 )
 	{
 		//ToDo: SpeedHack?
 		u32	new_pc( gCPUState.CurrentPC + ((s32)(s16)op_code.immediate<<2) + 4 );

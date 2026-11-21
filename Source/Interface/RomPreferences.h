@@ -78,6 +78,7 @@ struct SRomPreferences
 	bool						PatchesEnabled;
 	bool						DynarecEnabled;				// Requires DynarceSupported in RomSettings
 	bool						DynarecLoopOptimisation;
+	bool						Dynarec32BitMode;			// Faster: the upper halves of N64 registers are not kept (most games never use them)
 	bool						DynarecDoublesOptimisation;
 	bool						DoubleDisplayEnabled;
 	bool						CleanSceneEnabled;

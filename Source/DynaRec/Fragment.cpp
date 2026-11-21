@@ -19,6 +19,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 
 #include "Base/Types.h"
+#include "Interface/ConfigOptions.h"
 
 
 #include <stdio.h>
@@ -302,6 +303,7 @@ void CFragment::Execute()
 	u32					upper( 0x80000000 + gRamSize );
 
 	_EnterDynaRec( mEntryPoint.GetTarget(), &gCPUState, p, upper );
+
 #endif // FRAGMENT_SIMULATE_EXECUTION
 
 #ifdef DAEDALUS_DEBUG_DYNAREC
