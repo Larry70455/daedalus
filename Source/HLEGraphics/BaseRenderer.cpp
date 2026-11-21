@@ -85,6 +85,24 @@ extern void sceGuSetMatrix(int type, const ScePspFMatrix4 * mtx);
 //   On PSP we again use sceGuGetMemory.
 #ifdef DAEDALUS_PSP
 void * PSP_AllocFrameVertices( u32 bytes );
+#include "SysPSP/Graphics/GuStateCache.h"
+#undef sceGuEnable
+#undef sceGuDisable
+#undef sceGuTexFunc
+#undef sceGuTexEnvColor
+#undef sceGuTexWrap
+#undef sceGuTexFilter
+#undef sceGuBlendFunc
+#undef sceGuAlphaFunc
+#undef sceGuDepthMask
+#undef sceGuDepthFunc
+#undef sceGuShadeModel
+#undef sceGuTexMode
+#undef sceGuTexImage
+#undef sceGuClutMode
+#undef sceGuClutLoad
+#undef sceGuTexOffset
+#undef sceGuTexScale
 #endif
 struct TempVerts
 {
@@ -298,6 +316,10 @@ void BaseRenderer::Reset()
 //*****************************************************************************
 void BaseRenderer::BeginScene()
 {
+#ifdef DAEDALUS_PSP
+	GuCacheInvalidate();	// GE state cache: trust nothing set outside this display list
+	gGuCacheActive = true;
+#endif
 	CGraphicsContext::Get()->BeginFrame();
 
 	RestoreRenderStates();
@@ -314,6 +336,10 @@ void BaseRenderer::BeginScene()
 //*****************************************************************************
 void BaseRenderer::EndScene()
 {
+#ifdef DAEDALUS_PSP
+	GuCacheInvalidate();	// GE state cache: trust nothing set outside this display list
+	gGuCacheActive = false;
+#endif
 	CGraphicsContext::Get()->EndFrame();
 
 	//

@@ -67,6 +67,9 @@ static u32 __attribute__((aligned(16))) ilist[256];
 
 u32 listNum = 0;
 
+// GE state cache (GuStateCache.h)
+struct SGuStateCache;
+
 //*****************************************************************************
 // Frame vertex memory
 //

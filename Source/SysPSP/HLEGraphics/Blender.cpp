@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "Core/ROM.h"
 
 #include <pspgu.h>
+#include "SysPSP/Graphics/GuStateCache.h"	// last include: sends this file's GE state calls through the cache
 
 
 /*

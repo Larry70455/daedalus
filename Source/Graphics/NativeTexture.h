@@ -75,7 +75,13 @@ class CNativeTexture
 
 		inline const void *				GetPalette() const				{ return mpPalette; }
 		inline const void *				GetData() const					{ return mpData; }
+#ifdef DAEDALUS_PSP
+		// Writable access: the texture may change, so GE texture installs
+		// must not be skipped (see SysPSP/Graphics/GuStateCache.h)
+		inline void *					GetData()						{ extern u32 gGuTextureEpoch; ++gGuTextureEpoch; return mpData; }
+#else
 		inline void *					GetData()						{ return mpData; }
+#endif
 
 #if defined(DAEDALUS_CTR)
 		inline GLuint					GetTextureId() const				{ return mTextureId; }

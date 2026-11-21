@@ -32,6 +32,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "Utility/MathUtil.h"
 #include "SysPSP/Graphics/VideoMemoryManager.h"
 #include "Utility/FastMemcpy.h"
+#include "SysPSP/Graphics/GuStateCache.h"	// last include: sends this file's GE state calls through the cache
+
+SGuStateCache	gGuState;
+u32				gGuTextureEpoch = 0;
+bool			gGuCacheActive = false;
 
 
 //*****************************************************************************
@@ -604,6 +609,7 @@ std::shared_ptr<CNativeTexture>	CNativeTexture::CreateFromPng( const std::filesy
 //*****************************************************************************
 void	CNativeTexture::SetData( void * data, void * palette )
 {
+	++gGuTextureEpoch;	// texture memory changes (see GuStateCache.h)
 	u32		bytes_per_row( GetStride() );
 
 	if( HasData() )

@@ -20,6 +20,7 @@
 #include "Ultra/ultra_gbi.h"
 
 #include "Utility/Profiler.h"
+#include "SysPSP/Graphics/GuStateCache.h"	// last include: sends this file's GE state calls through the cache
 
 
 //Draw normal filled triangles
@@ -1334,6 +1335,7 @@ void RendererPSP::CreateRenderTargets()
 
 void RendererPSP::SetColorImage( u32 address, u32 width, u32 format, u32 size )
 {
+	++gGuTextureEpoch;	// render to texture writes texture memory
 	EndRenderTarget();
 
 	if( format != G_IM_FMT_RGBA || size != G_IM_SIZ_16b || width > kMaxRenderTargetWidth ||
@@ -1386,6 +1388,7 @@ void RendererPSP::SetColorImage( u32 address, u32 width, u32 format, u32 size )
 
 void RendererPSP::EndRenderTarget()
 {
+	++gGuTextureEpoch;	// render to texture writes texture memory
 	if( mActiveRenderTarget == nullptr )
 		return;
 	SRenderTarget * target = mActiveRenderTarget;
