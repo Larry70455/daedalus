@@ -21,6 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // unless DAEDALUS_STATE_CHECK is defined.
 
 #include "Base/Types.h"
+#include <vector>
 #include "Utility/StateCheck.h"
 
 #ifdef DAEDALUS_STATE_CHECK
@@ -55,6 +56,10 @@ static bool		gHashRam = true;
 static FILE *	gExcLog = nullptr;	// exclog=1: statecheck_exc.txt, one line per exception (vi, count, epc, cause, mi_intr)	// ramhash=0 in statecheck.txt turns the RAM checksum off (for timing runs)
 static u32		gLoadAt = 0;	// loadat=N: load the savestate through the in game path (CPU_RequestLoadState) at vertical blank N instead of before starting
 static std::string	gSaveStatePath;
+static u32		gSaveAt = 0;			// saveat=N:path: write a savestate at vertical blank N
+static std::string	gSaveAtPath;
+struct SPress { u32 Start; u32 Length; u16 Buttons; };
+static std::vector< SPress >	gPresses;	// press=VI:BUTTONS:LEN,...
 
 // FNV-1a over 32 bit words. Not cryptographic, only needs to change when the
 // data changes.
@@ -128,6 +133,28 @@ bool StateCheck_Start()
 		else if( key == "ramdump" )	gRamDumpFrame = (u32)std::strtoul( value.c_str(), nullptr, 10 );
 		else if( key == "exclog" )		{ if( value != "0" ) gExcLog = fopen( setBasePath( "statecheck_exc.txt" ).string().c_str(), "w" ); }
 		else if( key == "ramhash" )		gHashRam = ( value != "0" );
+		else if( key == "saveat" )
+		{
+			size_t colon = value.find( ':' );
+			if( colon != std::string::npos )
+			{
+				gSaveAt = (u32)std::strtoul( value.substr( 0, colon ).c_str(), nullptr, 10 );
+				gSaveAtPath = value.substr( colon + 1 );
+			}
+		}
+		else if( key == "press" )
+		{
+			const char * p = value.c_str();
+			while( *p )
+			{
+				unsigned vi = 0, buttons = 0, len = 0;
+				if( sscanf( p, "%u:%x:%u", &vi, &buttons, &len ) == 3 )
+					gPresses.push_back( SPress{ vi, len, (u16)buttons } );
+				const char * comma = strchr( p, ',' );
+				if( comma == nullptr ) break;
+				p = comma + 1;
+			}
+		}
 	}
 
 	if( rom.empty() || frames == 0 || ( mode != "interpreter" && mode != "dynarec" ) )
@@ -210,8 +237,33 @@ void StateCheck_OnVerticalBlank()
 	gFrame++;
 	if( gLoadAt != 0 && gFrame == gLoadAt && !gSaveStatePath.empty() )
 		printf( "StateCheck: in game load of %s: %d\n", gSaveStatePath.c_str(), (int)CPU_RequestLoadState( setBasePath( gSaveStatePath ) ) );
+	if( gSaveAt != 0 && gFrame == gSaveAt )
+		printf( "StateCheck: savestate to %s: %d\n", gSaveAtPath.c_str(), (int)CPU_RequestSaveState( setBasePath( gSaveAtPath ) ) );
 	if( gFrame >= gFramesWanted )
 		Finish();
+}
+
+bool StateCheck_OverrideInput( u16 * buttons )
+{
+	if( gPresses.empty() )
+	{
+		// No script: log real pad changes with their vertical blank, so a
+		// run driven by hand (or by an emulator's timed input) can be turned
+		// into a press= script.
+		static u16 last = 0;
+		if( gOut != nullptr && *buttons != last )
+		{
+			printf( "StateCheck: input vi %u buttons %04x\n", gFrame, *buttons );
+			last = *buttons;
+		}
+		return false;
+	}
+	u16 b = 0;
+	for( const SPress & p : gPresses )
+		if( gFrame >= p.Start && gFrame < p.Start + p.Length )
+			b |= p.Buttons;
+	*buttons = b;
+	return true;
 }
 
 void StateCheck_OnException()

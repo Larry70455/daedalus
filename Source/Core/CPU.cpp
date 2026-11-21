@@ -513,6 +513,7 @@ static void HandleSaveStateOperationOnVerticalBlank()
 		if( gRDPFrame < kDeferredLoadDisplayLists && ++gDeferredLoadVbls < kDeferredLoadMaxVbls )
 			return;
 		gDeferredLoad = false;
+		printf( "Deferred savestate load after %u vertical blanks\n", (unsigned)gDeferredLoadVbls );	// test scripts schedule input relative to this
 	}
 
 	//

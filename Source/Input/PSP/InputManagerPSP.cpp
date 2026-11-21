@@ -1,5 +1,6 @@
 
 #include "Base/Types.h"
+#include "Utility/StateCheck.h"
 
 
 #include <stack>
@@ -439,6 +440,17 @@ void IInputManager::GetState( OSContPad pPad[4] )
 	SwapJoyStick(&pPad[0], &pad);
 
 	pPad[0].button = mpControllerConfig->GetN64ButtonsState( pad.Buttons );
+#ifdef DAEDALUS_STATE_CHECK
+	{
+		u16 scripted = pPad[0].button;
+		if( StateCheck_OverrideInput( &scripted ) )	// press= in statecheck.txt (test harness)
+		{
+			pPad[0].button = scripted;
+			pPad[0].stick_x = 0;
+			pPad[0].stick_y = 0;
+		}
+	}
+#endif
 
 	// Synchronise the input - this will overwrite the real pad data when playing back input
 	for(u32 cont = 0; cont < 4; cont++)

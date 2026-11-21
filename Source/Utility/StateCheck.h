@@ -43,6 +43,13 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //                            through the pause menu path. Default: the ROM
 //                            browser path, which boots first and loads once
 //                            the game has drawn a few frames)
+//   press=VI:BUTTONS:LEN,...  (optional: scripted input. From vertical blank VI,
+//                            hold the N64 buttons BUTTONS (hex, CONT_* bits,
+//                            e.g. 8000 = A, 4000 = B, 0800 = d-pad up) for
+//                            LEN vertical blanks. Scheduling by vertical
+//                            blank instead of by time makes every build run
+//                            exactly the same game frames.)
+//   saveat=N:SaveStates/y.ss  (optional: write a savestate at vertical blank N)
 //   ramhash=0               (optional: skip the RAM checksum. It costs tens
 //                            of milliseconds per frame on a PSP, so turn it
 //                            off when the run is used for timing)
@@ -60,6 +67,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 bool	StateCheck_Start();
 void	StateCheck_OnVerticalBlank();
 void	StateCheck_OnException();	// exclog=1: one line per exception taken
+// Scripted input (press= in statecheck.txt): returns true and sets *buttons
+// when a script is active (the real pad is then ignored).
+bool	StateCheck_OverrideInput( u16 * buttons );
 
 #define DAEDALUS_STATE_CHECK_VBL()	StateCheck_OnVerticalBlank()
 #define DAEDALUS_STATE_CHECK_EXCEPTION()	StateCheck_OnException()

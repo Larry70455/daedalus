@@ -21,6 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 
 #include "Base/Types.h"
+#include <cstdio>
 
 #include <algorithm>
 #include <cstring> 
@@ -182,6 +183,7 @@ bool Memory_Init()
 #endif
 
 	g_pu8RamBase_8000 = ((u8*)g_pMemoryBuffers[MEM_RD_RAM]) - 0x80000000;
+	printf( "MemoryMap: RDRAM %p size %u\n", g_pMemoryBuffers[MEM_RD_RAM], (unsigned)gRamSize );	// for profiling tools
 
 	g_RomWritten = false;
 

@@ -19,6 +19,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 
 #include "Base/Types.h"
+#include <cstdio>
 
 #include "Debug/DBGConsole.h"
 #include "DynaRec/CodeBufferManager.h"
@@ -157,6 +158,7 @@ bool	CCodeBufferManagerPSP::Initialise()
 	mPrimaryBuffer.Initialise( 3 * 1024 * 1024 );
 	mSecondaryBuffer.Initialise( 3 * 1024 * 1024 );
 #endif
+	printf( "MemoryMap: CodeA %p CodeB %p size %u\n", mPrimaryBuffer.mpBuffer, mSecondaryBuffer.mpBuffer, (unsigned)mPrimaryBuffer.mBufferSize );	// for profiling tools
 	return true;
 }
 
