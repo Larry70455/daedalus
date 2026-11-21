@@ -1280,11 +1280,36 @@ CJumpLocation CCodeGeneratorPSP::GenerateExitCode( u32 exit_address, u32 jump_ad
 		return CJumpLocation( nullptr );
 	}
 
+	const u32 flush_start = GetAssemblyBuffer()->GetSize();
 	FlushAllRegisters( mRegisterCache, true );
 
 #if DAEDALUS_INLINE_EXIT_CHECK
 	if( jump_address == 0 )
 	{
+		// The last (up to) two instructions of the register write-back just
+		// above go into the delay slots of the BLEZ and the J below instead
+		// of NOPs: they are plain stores and constant loads that do not touch
+		// S5, so running them after the countdown update changes nothing.
+		// The second one also runs at the start of the event path, which
+		// leaves through the dispatcher afterwards (the call clobbers the
+		// registers it would store again in the J's delay slot).
+		PspOpCode delay_ops[ 2 ];
+		delay_ops[ 0 ]._u32 = 0;
+		delay_ops[ 1 ]._u32 = 0;
+		u32 num_delay_ops = 0;
+		{
+			const u32 end = GetAssemblyBuffer()->GetSize();
+			num_delay_ops = std::min< u32 >( 2, ( end - flush_start ) / 4 );
+			for( u32 k = 0; k < num_delay_ops; ++k )
+				delay_ops[ k ]._u32 = GetAssemblyBuffer()->GetWordAt( end - 4 * ( num_delay_ops - k ) );
+			GetAssemblyBuffer()->Truncate( end - 4 * num_delay_ops );
+			if( num_delay_ops == 1 )
+			{
+				delay_ops[ 1 ] = delay_ops[ 0 ];	// into the J's slot, nothing in the BLEZ's
+				delay_ops[ 0 ]._u32 = 0;
+			}
+		}
+
 		// Inline version of _DirectExitCheckNoDelay (DynaRecStubs.S): update
 		// COUNT and the first event's countdown here, and only leave the
 		// fragment's code when an event is due. CurrentPC and Delay are only
@@ -1292,22 +1317,24 @@ CJumpLocation CCodeGeneratorPSP::GenerateExitCode( u32 exit_address, u32 jump_ad
 		// or next fragment not compiled yet); fragments linked to each other
 		// never read them.
 		ADDIU( PspReg_S5, PspReg_S5, -s16( num_instructions ) );	// event countdown, see SyncCountersOut
-		CJumpLocation to_event( BLEZ( PspReg_S5, CCodeLabel( nullptr ), true ) );
+		CJumpLocation to_event( BLEZ( PspReg_S5, CCodeLabel( nullptr ), false ) );
+		AppendOp( delay_ops[ 0 ] );
 
 		// Continue with the next fragment (patched in when it is compiled)
-		CCodeLabel continue_label( GetAssemblyBuffer()->GetLabel() );
-		CJumpLocation jump_to_next_fragment( J( next_fragment, true ) );
+		CJumpLocation jump_to_next_fragment( J( next_fragment, false ) );
+		AppendOp( delay_ops[ 1 ] );
 
-		// An event is due: same as _DirectExitCheckCheckCount
+		// An event is due: same as _DirectExitCheckCheckCount, then back to
+		// the dispatcher (which carries on at exit_address)
 		PatchJumpLong( to_event, GetAssemblyBuffer()->GetLabel() );
+		if( delay_ops[ 1 ]._u32 != 0 )
+			AppendOp( delay_ops[ 1 ] );
 		LoadConstant( PspReg_A1, exit_address );
 		SetVar( &gCPUState.CurrentPC, PspReg_A1 );
 		SetVar( &gCPUState.Delay, NO_DELAY );
 		SyncCountersOut();
 		JAL( CCodeLabel( reinterpret_cast< const void * >( CPU_HANDLE_COUNT_INTERRUPT ) ), true );
 		SyncCountersIn();
-		GetVar( PspReg_V0, (const u32*)&gCPUState.StuffToDo );
-		BEQ( PspReg_V0, PspReg_R0, continue_label, true );
 		J( CCodeLabel( reinterpret_cast< const void * >( _SyncAndReturnFromDynaRec ) ), true );
 
 		if( !next_fragment.IsSet() )

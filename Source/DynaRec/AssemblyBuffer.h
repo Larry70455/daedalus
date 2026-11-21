@@ -76,6 +76,10 @@ class CAssemblyBuffer
 		CCodeLabel			GetLabel() const											{ return CCodeLabel(&mpCodeBuffer[mCurrentPos]); }
 		CJumpLocation		GetJumpLocation() const										{ return CJumpLocation(&mpCodeBuffer[mCurrentPos]); }
 		u32					GetSize() const												{ return mCurrentPos; }
+		// Read back an emitted word, and drop words from the end (to move
+		// already emitted instructions, e.g. into branch delay slots)
+		u32					GetWordAt( u32 pos ) const									{ return *reinterpret_cast< const u32 * >( &mpWritePointer[ pos ] ); }
+		void				Truncate( u32 pos )											{ mCurrentPos = pos; }
 
 		void				SetBuffer( u8 * pbuffer )
 		{
