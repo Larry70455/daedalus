@@ -93,6 +93,11 @@ private:
 	CBlendStates *		mFillBlendStates;
 	using BlendStatesMap = std::map < u64, SBlendStateEntry >;
 	BlendStatesMap		mBlendStatesMap;
+	// Most draws reuse the previous draw's combiner: remember the last lookup
+	// to skip the map search (entries are never removed, so this stays valid).
+	// ~0 can never be a key (the top bits of a mux are always clear).
+	u64					mLastBlendKey = ~0ull;
+	SBlendStateEntry	mLastBlendEntry;
 
 
 	// Functions and members related to the DisplayListDebugger.

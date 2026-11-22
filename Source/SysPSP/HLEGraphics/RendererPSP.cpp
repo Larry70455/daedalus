@@ -297,9 +297,14 @@ RendererPSP::SBlendStateEntry RendererPSP::LookupBlendState( u64 mux, bool two_c
 	// Top 8 bits are never set - use the very top one to differentiate between 1/2 cycles
 	key._u32_1 |= (two_cycles << 31);
 
+	if( key._u64 == mLastBlendKey )
+		return mLastBlendEntry;
+
 	BlendStatesMap::const_iterator	it( mBlendStatesMap.find( key._u64 ) );
 	if( it != mBlendStatesMap.end() )
 	{
+		mLastBlendKey = key._u64;
+		mLastBlendEntry = it->second;
 		return it->second;
 	}
 
@@ -326,6 +331,8 @@ RendererPSP::SBlendStateEntry RendererPSP::LookupBlendState( u64 mux, bool two_c
 
 	//Add blend mode to the Blend States Map
 	mBlendStatesMap[ key._u64 ] = entry;
+	mLastBlendKey = key._u64;
+	mLastBlendEntry = entry;
 
 	return entry;
 }
