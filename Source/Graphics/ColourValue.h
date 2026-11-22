@@ -54,9 +54,27 @@ class c32 /*: public NativePf8888*/
 				c32		SubRGB( c32 colour ) const;
 				c32		SubA( c32 colour ) const;
 
-				c32		Modulate( c32 colour ) const;
-				c32		ModulateRGB( c32 colour ) const;
-				c32		ModulateA( c32 colour ) const;
+				// Inline: these run per vertex in the combiner
+				static	u8		ModulateComponent( u8 a, u8 b )
+				{
+					// Same result as (a * b + 127) / 255 for every a and b
+					// (checked for all 65536 pairs), without the slow division
+					return u8(((u32(a) * u32(b) + 128) * 257) >> 16);
+				}
+				c32		Modulate( c32 colour ) const
+				{
+					return c32( ModulateComponent( GetR(), colour.GetR() ), ModulateComponent( GetG(), colour.GetG() ),
+								ModulateComponent( GetB(), colour.GetB() ), ModulateComponent( GetA(), colour.GetA() ) );
+				}
+				c32		ModulateRGB( c32 colour ) const
+				{
+					return c32( ModulateComponent( GetR(), colour.GetR() ), ModulateComponent( GetG(), colour.GetG() ),
+								ModulateComponent( GetB(), colour.GetB() ), GetA() );
+				}
+				c32		ModulateA( c32 colour ) const
+				{
+					return c32( GetR(), GetG(), GetB(), ModulateComponent( GetA(), colour.GetA() ) );
+				}
 
 				c32		Interpolate( c32 colour, float factor ) const;
 				c32		Interpolate( c32 colour, c32 factor ) const;
