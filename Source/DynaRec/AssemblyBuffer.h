@@ -33,6 +33,7 @@ class CAssemblyBuffer
 		:	mpCodeBuffer(nullptr)
 		,	mpWritePointer(nullptr)
 		,	mCurrentPos( 0 )
+		,	mLastMarkPos( 0 )
 		{
 		}
 
@@ -73,8 +74,12 @@ class CAssemblyBuffer
 		}
 
 		CCodeLabel			GetStartAddress() const										{ return CCodeLabel(&mpCodeBuffer[0]); }
-		CCodeLabel			GetLabel() const											{ return CCodeLabel(&mpCodeBuffer[mCurrentPos]); }
-		CJumpLocation		GetJumpLocation() const										{ return CJumpLocation(&mpCodeBuffer[mCurrentPos]); }
+		CCodeLabel			GetLabel() const											{ mLastMarkPos = mCurrentPos; return CCodeLabel(&mpCodeBuffer[mCurrentPos]); }
+		CJumpLocation		GetJumpLocation() const										{ mLastMarkPos = mCurrentPos; return CJumpLocation(&mpCodeBuffer[mCurrentPos]); }
+		// Highest position anyone took a label or jump location at: code there
+		// may be jumped to or patched, so instructions at or after it must not
+		// be moved (see the PSP branch delay slot filling)
+		u32					GetLastMarkPos() const										{ return mLastMarkPos; }
 		u32					GetSize() const												{ return mCurrentPos; }
 		// Read back an emitted word, and drop words from the end (to move
 		// already emitted instructions, e.g. into branch delay slots)
@@ -90,12 +95,14 @@ class CAssemblyBuffer
 			//ToDo: Test this
 			//mpWritePointer = mpCodeBuffer;
 			mCurrentPos = 0;
+			mLastMarkPos = 0;	// the start of the buffer is an entry point
 		}
 
 protected:
 	u8 *					mpCodeBuffer;
 	u8 *					mpWritePointer;
 	u32						mCurrentPos;		// Current writing position in buffer
+	mutable u32				mLastMarkPos;		// see GetLastMarkPos
 };
 
 #endif // DYNAREC_ASSEMBLYBUFFER_H_
