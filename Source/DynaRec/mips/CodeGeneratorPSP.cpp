@@ -955,6 +955,12 @@ inline void CCodeGeneratorPSP::SetRegister( EN64Reg n64_reg, u32 lo_hi_idx, u32 
 // written by a 32 bit instruction in another fragment gets a stale upper
 // half, so the option can be turned off per game.
 //*****************************************************************************
+// 1: in 32 bit mode, a zero upper half (from LBU, ANDI, SLT, ...) is not
+// written back either (see UpdateRegister). 0: it is, as before.
+#ifndef DAEDALUS_32BIT_SKIP_HI_ZERO
+#define DAEDALUS_32BIT_SKIP_HI_ZERO 1
+#endif
+
 void CCodeGeneratorPSP::ForgetHi( EN64Reg n64_reg )
 {
 	mRegisterCache.SetHiSignExtendPending( n64_reg, false );
@@ -1000,6 +1006,17 @@ void CCodeGeneratorPSP::UpdateRegister( EN64Reg n64_reg, EPspReg psp_reg, bool o
 	else	// == URO_HI_CLEAR
 	{
 		SetRegister( n64_reg, 1, 0 );
+#if DAEDALUS_32BIT_SKIP_HI_ZERO
+		// 32 bit mode: the zero upper half stays known inside this fragment
+		// (64 bit instructions here still see it), but is not written back,
+		// the same as the upper half of sign extended 32 bit results (see
+		// ForgetHi). These stores were about half of the remaining upper half
+		// stores, mostly in exit code.
+		// Only when the upper half has no PSP register of its own (loops
+		// that cache it expect that register to hold the value at the top).
+		if( gDynarec32BitMode && !mRegisterCache.IsCached( n64_reg, 1 ) )
+			mRegisterCache.MarkAsDirty( n64_reg, 1, false );
+#endif
 	}
 }
 
