@@ -98,8 +98,8 @@ static u32			gFrameStart = 0;
 static u32			gFrameIndex = 0;
 // Vertical blanks spent in each audio mode (Off, Async, Sync): the mode can
 // change from the pause menu during a session
-static u32			gAudioModeFrames[ 3 ] = { 0, 0, 0 };
-static const char * const kAudioModeNames[ 3 ] = { "off", "async", "sync" };
+static u32			gAudioModeFrames[ 4 ] = { 0, 0, 0, 0 };
+static const char * const kAudioModeNames[ 4 ] = { "off", "async", "sync", "smooth" };
 static u32			gFlipsThisFrame = 0;
 
 u32					gInterpretedOps = 0;
@@ -319,6 +319,7 @@ static void WriteInterpretedHot()
 	fprintf( fh, "# audio underruns (output ran dry, heard as crackle): %u\n", gStats[ kStatAudioUnderrun ] );
 	fprintf( fh, "# async audio: %u lists run on the Media Engine, %u on the main CPU because the Media Engine was still busy\n",
 			 gStats[ kStatAudioMeJobs ], gStats[ kStatAudioMeBusy ] );
+	fprintf( fh, "# smooth audio: %u times the sound was skipped for a second because the game fell far behind\n", gStats[ kStatAudioSmoothQuiet ] );
 	fprintf( fh, "# Hottest 256 byte blocks (a function or loop usually lives in one or two):\n" );
 	for( size_t i = 0; i < blocks.size() && i < 30; ++i )
 		fprintf( fh, "  block %08x  %10u  %5.1f%%\n", blocks[ i ].pc, blocks[ i ].count, 100.0 * blocks[ i ].count / (double)total );
@@ -553,7 +554,7 @@ void OpenGame()
 	snprintf( line, sizeof( line ), "# session start, game \"%s\", crc %08x-%08x, units: microseconds per N64 vertical blank\n",
 			  g_ROM.settings.GameName.c_str(), g_ROM.mRomID.CRC[ 0 ], g_ROM.mRomID.CRC[ 1 ] );
 	gPending += line;
-	snprintf( line, sizeof( line ), "# settings: audio %s at start\n", (u32)gAudioPluginEnabled < 3 ? kAudioModeNames[ gAudioPluginEnabled ] : "?" );
+	snprintf( line, sizeof( line ), "# settings: audio %s at start\n", (u32)gAudioPluginEnabled < 4 ? kAudioModeNames[ gAudioPluginEnabled ] : "?" );
 	gPending += line;
 #ifdef DAEDALUS_PSP
 	WriteSystemInfo( gPending );
@@ -641,7 +642,7 @@ void EndFrame()
 	gTotalFrameMicros += total;
 	gTotalFlips += gFlipsThisFrame;
 	gFrameIndex++;
-	if( (u32)gAudioPluginEnabled < 3 )
+	if( (u32)gAudioPluginEnabled < 4 )
 		gAudioModeFrames[ gAudioPluginEnabled ]++;
 
 	ResetFrame( now );
@@ -687,8 +688,8 @@ void CloseGame()
 				  f64( gTotalInterpreted ) / f64( gFrameIndex ), f64( gTotalFallback ) / f64( gFrameIndex ) );
 		gPending += line;
 
-		snprintf( line, sizeof( line ), "# summary: vertical blanks with audio off %u, async %u, sync %u\n",
-				  gAudioModeFrames[ 0 ], gAudioModeFrames[ 1 ], gAudioModeFrames[ 2 ] );
+		snprintf( line, sizeof( line ), "# summary: vertical blanks with audio off %u, async %u, sync %u, smooth %u\n",
+				  gAudioModeFrames[ 0 ], gAudioModeFrames[ 1 ], gAudioModeFrames[ 2 ], gAudioModeFrames[ 3 ] );
 		gPending += line;
 #ifdef DAEDALUS_PSP
 		if( gHwProfiler )

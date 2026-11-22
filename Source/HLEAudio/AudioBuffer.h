@@ -45,6 +45,17 @@ public:
 
   u32 GetNumBufferedSamples() const;
 
+#ifdef DAEDALUS_PSP
+  // Smooth mode: after running dry, stay silent until the buffer is half
+  // full again, then fade back in. One clean short pause instead of a burst
+  // of crackle.
+  void SetSmooth(bool smooth) { mSmooth = smooth; }
+  // Counters for the "give up for a second" logic (written by the audio
+  // thread, read by the emulator thread)
+  u32 GetPlayedSamples() const { return mPlayedSamples; }
+  u32 GetMissingSamples() const { return mMissingSamples; }
+#endif
+
 private:
   Sample *mBufferBegin;
   Sample *mBufferEnd;
@@ -53,6 +64,11 @@ private:
   Sample *volatile mWritePtr;
 #ifdef DAEDALUS_PSP
 	Sample	mLastDrained;	// last sample played (fade out on underrun)
+	volatile bool	mSmooth;
+	volatile bool	mRefilling;		// smooth mode: waiting for the buffer to refill
+	u32		mFadeIn;				// samples left in the fade back in
+	volatile u32	mPlayedSamples;
+	volatile u32	mMissingSamples;
 #endif
 };
 

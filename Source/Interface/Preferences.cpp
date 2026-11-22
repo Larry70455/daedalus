@@ -276,7 +276,11 @@ bool IPreferences::OpenPreferencesFile( const std::filesystem::path  &filename )
 		{
 			int audio_enabled = atoi( property->GetValue() );
 
+			#ifdef DAEDALUS_PSP
+			if( audio_enabled >= APM_DISABLED && audio_enabled <= APM_ENABLED_SMOOTH )
+#else
 			if( audio_enabled >= APM_DISABLED && audio_enabled <= APM_ENABLED_SYNC )
+#endif
 				preferences.AudioEnabled = static_cast<EAudioPluginMode>( audio_enabled );
 			else
 				preferences.AudioEnabled = APM_DISABLED;

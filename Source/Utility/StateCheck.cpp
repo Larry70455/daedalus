@@ -51,7 +51,7 @@ static u32		gFrame = 0;
 static int		gAudioOverride = -1;
 static int		gMemOptOverride = -1;
 static int		gBit32Override = -1;	// bit32=0|1 overrides the dynarec 32 bit register mode
-static int		gPatchesOverride = -1;	// patches=0|1 overrides the OS function patches (HLE) ROM setting	// memopt=0|1 overrides the "memory access optimisation" ROM setting	// audio=0|1|2 in statecheck.txt (off, async, sync); -1 keeps the ROM setting
+static int		gPatchesOverride = -1;	// patches=0|1 overrides the OS function patches (HLE) ROM setting	// memopt=0|1 overrides the "memory access optimisation" ROM setting	// audio=0|1|2|3 in statecheck.txt (off, async, sync, smooth); -1 keeps the ROM setting
 static u32		gRamDumpFrame = ~0u;	// ramdump=N: write all of RDRAM to statecheck_ram.bin at vertical blank N
 static bool		gHashRam = true;
 static FILE *	gExcLog = nullptr;	// exclog=1: statecheck_exc.txt, one line per exception (vi, count, epc, cause, mi_intr)	// ramhash=0 in statecheck.txt turns the RAM checksum off (for timing runs)
@@ -190,7 +190,7 @@ bool StateCheck_Start()
 		gMemoryAccessOptimisation = ( gMemOptOverride != 0 );
 	if( gBit32Override >= 0 )
 		gDynarec32BitMode = ( gBit32Override != 0 );
-	if( gAudioOverride >= 0 && gAudioOverride <= 2 )
+	if( gAudioOverride >= 0 && gAudioOverride <= (int)APM_ENABLED_SMOOTH )
 		gAudioPluginEnabled = static_cast< EAudioPluginMode >( gAudioOverride );
 	gSpeedSyncEnabled = 0;	// No speed limiting: the result must not depend on wall clock time
 

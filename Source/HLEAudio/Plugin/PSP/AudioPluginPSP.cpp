@@ -141,6 +141,67 @@ private:
 
 static AudioPluginPSP * ac;
 
+//
+// Smooth mode: plays in sync like Synchronous, but checks once a second how
+// much sound went missing because the game ran slower than real time. When
+// more than a quarter was missing, it stops making sound for one second:
+// the audio lists are skipped (about 3 ms of CPU time per frame in Pokemon
+// Stadium 2), so the game catches up, then the sound fades back in.
+// Skipping a list is what audio Disabled does all the time, so games are
+// fine with it.
+//
+static const u32	kSmoothWindowUs = 1000000;	// how often to check
+static const u32	kSmoothQuietUs = 1000000;	// how long to go quiet
+static bool			gSmoothQuiet = false;
+static u32			gSmoothQuietUntil = 0;
+static u32			gSmoothWindowStart = 0;
+static u32			gSmoothWindowPlayed = 0;
+static u32			gSmoothWindowMissing = 0;
+
+static void SmoothStartWindow( const CAudioBuffer * buffer, u32 now )
+{
+	gSmoothWindowStart = now;
+	gSmoothWindowPlayed = buffer->GetPlayedSamples();
+	gSmoothWindowMissing = buffer->GetMissingSamples();
+}
+
+// True while the sound should be skipped
+static bool SmoothIsQuiet( const CAudioBuffer * buffer )
+{
+	const u32 now = sceKernelGetSystemTimeLow();
+	if( gSmoothQuiet )
+	{
+		if( (s32)( now - gSmoothQuietUntil ) < 0 )
+			return true;
+		gSmoothQuiet = false;
+		SmoothStartWindow( buffer, now );	// the quiet second itself does not count
+		return false;
+	}
+
+	const u32 elapsed = now - gSmoothWindowStart;
+	if( elapsed < kSmoothWindowUs )
+		return false;
+
+	const u32 played = buffer->GetPlayedSamples() - gSmoothWindowPlayed;
+	const u32 missing = buffer->GetMissingSamples() - gSmoothWindowMissing;
+	SmoothStartWindow( buffer, now );
+
+	// A window much longer than a second means the emulator was paused (menu):
+	// the sound ran dry then for a different reason, so ignore it
+	if( elapsed > 2 * kSmoothWindowUs )
+		return false;
+
+	// missing / (played + missing) > 1/4
+	if( missing * 3 > played )
+	{
+		DAEDALUS_PERF_STAT( kStatAudioSmoothQuiet );	// No-op unless DAEDALUS_PERF_LOG
+		gSmoothQuiet = true;
+		gSmoothQuietUntil = now + kSmoothQuietUs;
+		return true;
+	}
+	return false;
+}
+
 void AudioPluginPSP::FillBuffer(Sample * buffer, u32 num_samples)
 {
 	sceKernelWaitSema( mSemaphore, 1, nullptr );
@@ -276,6 +337,11 @@ EProcessResult	AudioPluginPSP::ProcessAList()
 			Audio_Ucode();
 			result = PR_COMPLETED;
 			break;
+		case APM_ENABLED_SMOOTH:
+			if( !SmoothIsQuiet( mAudioBufferUncached ) )
+				Audio_Ucode();
+			result = PR_COMPLETED;
+			break;
 	}
 
 	return result;
@@ -332,7 +398,16 @@ void AudioPluginPSP::AddBuffer( u8 *start, u32 length )
 
 	case APM_ENABLED_SYNC:
 		{
+			mAudioBufferUncached->SetSmooth( false );
 			mAudioBufferUncached->AddSamples( reinterpret_cast< const Sample * >( start ), num_samples, mFrequency, kOutputFrequency );
+		}
+		break;
+
+	case APM_ENABLED_SMOOTH:
+		{
+			mAudioBufferUncached->SetSmooth( true );
+			if( !gSmoothQuiet )
+				mAudioBufferUncached->AddSamples( reinterpret_cast< const Sample * >( start ), num_samples, mFrequency, kOutputFrequency );
 		}
 		break;
 	}

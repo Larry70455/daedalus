@@ -100,6 +100,7 @@ namespace PerfLog
 		kStatFragmentsDropped,	// fragments dropped that way
 		kStatAudioMeJobs,		// Async audio: audio lists handed to the Media Engine
 		kStatAudioMeBusy,		// Async audio: Media Engine still busy, the list ran on the main CPU
+		kStatAudioSmoothQuiet,	// Smooth audio: seconds of sound skipped because the game fell far behind
 		kNumStats
 	};
 	extern u32 gStats[ kNumStats ];

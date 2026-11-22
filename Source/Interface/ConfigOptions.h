@@ -53,6 +53,8 @@ enum EAudioPluginMode
 	APM_DISABLED,
 	APM_ENABLED_ASYNC,
 	APM_ENABLED_SYNC,
+	APM_ENABLED_SMOOTH,	// PSP only: sync, but pauses cleanly instead of crackling and
+						// stops making sound for a second when the game falls far behind
 };
 
 extern EAudioPluginMode gAudioPluginEnabled;

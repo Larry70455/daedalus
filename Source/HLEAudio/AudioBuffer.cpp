@@ -33,12 +33,21 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "SysPSP/Utility/CacheUtil.h"
 #endif
 
+#ifdef DAEDALUS_PSP
+static const u32 kFadeInSamples = 256;
+#endif
+
 CAudioBuffer::CAudioBuffer(u32 buffer_size)
     : mBufferBegin(new Sample[buffer_size]),
       mBufferEnd(mBufferBegin + buffer_size), mReadPtr(mBufferBegin),
       mWritePtr(mBufferBegin) {
 #ifdef DAEDALUS_PSP
   mLastDrained.L = mLastDrained.R = 0;
+  mSmooth = false;
+  mRefilling = false;
+  mFadeIn = 0;
+  mPlayedSamples = 0;
+  mMissingSamples = 0;
 #endif
 }
 
@@ -59,12 +68,6 @@ u32 CAudioBuffer::GetNumBufferedSamples() const {
 
   return diff;
 }
-
-// 1: stretch sound slightly when the buffer runs low and fade out on
-// underrun instead of a hard drop to silence (PSP only). 0: original code.
-#ifndef DAEDALUS_AUDIO_RATE_CONTROL
-#define DAEDALUS_AUDIO_RATE_CONTROL 1
-#endif
 
 void CAudioBuffer::AddSamples(const Sample *samples, u32 num_samples,
                               u32 frequency, u32 output_freq) {
@@ -98,23 +101,6 @@ fh.flush();
   //reduce s by 1.0 (to keep it in the range 0.0 .. 1.0) 	Principle is the same
   //but rewritten to integer mode (faster & less ASM) //Corn
 
-#if defined(DAEDALUS_PSP) && DAEDALUS_AUDIO_RATE_CONTROL
-  // Dynamic rate control: when the game runs a little slower than real time
-  // (heavy frames), sound arrives slower than it is played and the buffer
-  // runs dry: heard as crackle. Below half full, stretch the incoming sound
-  // by up to 5% (slightly slower playback) so the buffer refills instead.
-  // At half full or more nothing changes, so in Sync mode the full buffer
-  // still paces the emulator exactly as before.
-  {
-    const u32 size = mBufferEnd - mBufferBegin;
-    const u32 half = size / 2;
-    const u32 buffered = GetNumBufferedSamples();
-    if (buffered < half) {
-      const u32 deficit = half - buffered;
-      output_freq += (output_freq / 20) * deficit / half;	// up to +5%
-    }
-  }
-#endif
   const s32 r = (frequency << 12) / output_freq;
   s32 s = 0;
   u32 in_idx = 0;
@@ -212,6 +198,27 @@ u32 CAudioBuffer::Drain(Sample *samples, u32 num_samples) {
   Sample *out_ptr(samples);
   u32 samples_required(num_samples);
 
+#ifdef DAEDALUS_PSP
+  // Smooth mode, after running dry: stay quiet until the buffer is half full
+  // again (about 46 ms of sound), so playback resumes with one clean pause
+  // instead of a burst of tiny gaps (crackle)
+  if (mSmooth && mRefilling) {
+    if (GetNumBufferedSamples() < (u32)(mBufferEnd - mBufferBegin) / 2) {
+      Sample last = mLastDrained;
+      for (u32 i = 0; i < num_samples; ++i) {
+        last.L = (s16)((last.L * 15) / 16);
+        last.R = (s16)((last.R * 15) / 16);
+        samples[i] = last;
+      }
+      mLastDrained = last;
+      mMissingSamples += num_samples;
+      return 0;
+    }
+    mRefilling = false;
+    mFadeIn = kFadeInSamples;
+  }
+#endif
+
   while (samples_required > 0) {
     // Check if empty
     if (read_ptr == write_ptr)
@@ -241,6 +248,20 @@ std::ofstream fh;
  }
 #endif 
   mReadPtr = read_ptr; // No need to invalidate, as this is uncached
+
+#ifdef DAEDALUS_PSP
+  // Fade back in after a smooth mode pause (about 6 ms)
+  {
+    const u32 copied = num_samples - samples_required;
+    for (u32 i = 0; i < copied && mFadeIn > 0; ++i, --mFadeIn) {
+      const s32 gain = kFadeInSamples - mFadeIn;
+      samples[i].L = (s16)((samples[i].L * gain) / (s32)kFadeInSamples);
+      samples[i].R = (s16)((samples[i].R * gain) / (s32)kFadeInSamples);
+    }
+    mPlayedSamples += copied;
+    mMissingSamples += samples_required;
+  }
+#endif
 // clear the Cache
 #ifdef DAEDALUS_PSP
 // sceKernelDcacheWritebackInvalidateAll();
@@ -252,7 +273,7 @@ std::ofstream fh;
   if (samples_required > 0) {
     // DBGConsole_Msg( 0, "Buffer underflow (%d samples)\n", samples_required );
     // printf( "Buffer underflow (%d samples)\n", samples_required );
-#if defined(DAEDALUS_PSP) && DAEDALUS_AUDIO_RATE_CONTROL
+#ifdef DAEDALUS_PSP
     // Fade the last sample out over about 1 ms instead of dropping to zero
     // at once: the jump to silence is what is heard as a click
     Sample last = (out_ptr != samples) ? out_ptr[-1] : mLastDrained;
@@ -262,11 +283,13 @@ std::ofstream fh;
       out_ptr[i] = last;
     }
     mLastDrained = last;
+    if (mSmooth)
+      mRefilling = true;
 #else
     memset(out_ptr, 0, samples_required * sizeof(Sample));
 #endif
   }
-#if defined(DAEDALUS_PSP) && DAEDALUS_AUDIO_RATE_CONTROL
+#ifdef DAEDALUS_PSP
   else if (num_samples > 0) {
     mLastDrained = samples[num_samples - 1];
   }
