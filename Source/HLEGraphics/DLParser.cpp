@@ -415,6 +415,28 @@ SProfileItemHandle * gpProfileItemHandles[ 256 ];
 //*****************************************************************************
 //	Process the entire display list in one go
 //*****************************************************************************
+#if DAEDALUS_MERGE_DRAWS
+void DLParser_RDPPipeSync( MicroCodeCommand command );
+void DLParser_RDPTileSync( MicroCodeCommand command );
+void DLParser_RDPLoadSync( MicroCodeCommand command );
+void DLParser_Nothing( MicroCodeCommand command );
+
+// Commands that cannot change how already prepared triangles are drawn:
+// vertex loads (they only write the N64 vertex buffer; a projection change
+// they cause flushes in UpdateWorldProject), triangles, display list calls
+// and returns, syncs and no-ops. Anything else draws the held back
+// triangles first (see BaseRenderer::FlushTris).
+static inline bool DLParser_KeepsPendingDraw( MicroCodeInstruction f )
+{
+	return f == DLParser_GBI2_Vtx || f == DLParser_GBI1_Vtx || f == DLParser_GBI0_Vtx ||
+		   f == DLParser_GBI2_Tri1 || f == DLParser_GBI2_Tri2 || f == DLParser_GBI2_Quad ||
+		   f == DLParser_GBI1_Tri1 || f == DLParser_GBI1_Tri2 || f == DLParser_GBI0_Tri1 ||
+		   f == DLParser_GBI1_DL || f == DLParser_GBI1_EndDL ||
+		   f == DLParser_RDPPipeSync || f == DLParser_RDPTileSync || f == DLParser_RDPLoadSync ||
+		   f == DLParser_GBI1_Noop || f == DLParser_GBI1_SpNoop || f == DLParser_Nothing;
+}
+#endif
+
 static u32 DLParser_ProcessDList(u32 instruction_limit)
 {
 	MicroCodeCommand command;
@@ -430,6 +452,10 @@ static u32 DLParser_ProcessDList(u32 instruction_limit)
 
 		PROFILE_DL_CMD( command.inst.cmd );
 
+#if DAEDALUS_MERGE_DRAWS
+		if( gRenderer->HasPendingDraw() && !DLParser_KeepsPendingDraw( gUcodeFunc[ command.inst.cmd ] ) )
+			gRenderer->FlushPendingDraw();
+#endif
 		gUcodeFunc[ command.inst.cmd ]( command );
 
 		DL_END_INSTR();
@@ -535,6 +561,7 @@ u32 DLParser_Process(u32 instruction_limit, DLDebugOutput * debug_output)
 		gRenderer->Reset();
 		gRenderer->BeginScene();
 		count = DLParser_ProcessDList(instruction_limit);
+		gRenderer->FlushPendingDraw();
 		gRenderer->EndRenderTarget();
 		gRenderer->EndScene();
 	}

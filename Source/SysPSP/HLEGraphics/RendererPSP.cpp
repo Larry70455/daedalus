@@ -337,6 +337,30 @@ RendererPSP::SBlendStateEntry RendererPSP::LookupBlendState( u64 mux, bool two_c
 	return entry;
 }
 
+//
+// One draw of batches A and B is the same as drawing A then B, as long as
+// each batch is drawn in a single pass. Two passes (fog, or a combiner that
+// needs several) would draw A1 B1 A2 B2 instead of A1 A2 B1 B2. That still
+// gives the same picture when the first pass writes depth and does not
+// blend: the second pass only touches pixels whose depth equals its own
+// (fog uses an equal depth test) or blends over the final opaque pixel.
+//
+bool RendererPSP::CanMergeDraws()
+{
+	if( gRDPOtherMode.z_upd && !gRDPOtherMode.force_bl )
+		return true;
+	if( mTnL.Flags.Fog )
+		return false;
+	const u32 cycle_mode = gRDPOtherMode.cycle_type;
+	if( cycle_mode == CYCLE_1CYCLE || cycle_mode == CYCLE_2CYCLE )
+	{
+		const SBlendStateEntry entry = LookupBlendState( mMux, cycle_mode == CYCLE_2CYCLE );
+		if( entry.OverrideFunction == nullptr && entry.States != nullptr && entry.States->GetNumStates() > 1 )
+			return false;
+	}
+	return true;
+}
+
 void RendererPSP::RenderTriangles( DaedalusVtx * p_vertices, u32 num_vertices, bool disable_zbuffer )
 {
 	if( mTnL.Flags.Texture )

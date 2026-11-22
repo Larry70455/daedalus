@@ -225,6 +225,19 @@ enum CycleType
 };
 
 static const u32 kMaxN64Vertices = 80;		// F3DLP.Rej supports up to 80 verts!
+
+// 1: consecutive triangle batches separated only by vertex loads, display
+// list calls and syncs are drawn as one batch (PSP only, see FlushTris).
+// Over half the draws in Pokemon Stadium 2 merge this way, and every draw
+// costs CPU time to set up. 0: one draw per batch as before.
+#ifdef DAEDALUS_PSP
+#ifndef DAEDALUS_MERGE_DRAWS
+#define DAEDALUS_MERGE_DRAWS 1
+#endif
+#else
+#undef DAEDALUS_MERGE_DRAWS
+#define DAEDALUS_MERGE_DRAWS 0
+#endif
 //*****************************************************************************
 //
 //*****************************************************************************
@@ -349,6 +362,16 @@ public:
 
 	// Render our current triangle list to screen
 	void				FlushTris();
+
+#if DAEDALUS_MERGE_DRAWS
+	// Draws the triangles FlushTris held back. Called before anything that
+	// could change how they are drawn (see DLParser_ProcessDList).
+	inline void			FlushPendingDraw()						{ if( mPendingCount != 0 ) DrawPending(); }
+	inline bool			HasPendingDraw() const					{ return mPendingCount != 0; }
+#else
+	inline void			FlushPendingDraw()						{}
+	inline bool			HasPendingDraw() const					{ return false; }
+#endif
 	//void				Line3D( u32 v0, u32 v1, u32 width );
 
 	// Returns true if bounding volume is visible within NDC box, false if culled
@@ -418,6 +441,11 @@ protected:
 
 
 	virtual void		RenderTriangles( DaedalusVtx * p_vertices, u32 num_vertices, bool disable_zbuffer ) = 0;
+#if DAEDALUS_MERGE_DRAWS
+	// True if drawing two batches as one gives exactly the same picture as
+	// drawing them one after the other with the current state
+	virtual bool		CanMergeDraws() = 0;
+#endif
 
 	void 				TestVFPUVerts( u32 v0, u32 num, const FiddledVtx * verts, const glm::mat4 & mat_world );
 	template< bool FogEnable, int TextureMode >
@@ -517,6 +545,14 @@ protected:
 	// std::array<DaedalusVtx4, kMaxN64Vertices> mVtxProjected;
 	DaedalusVtx4		mVtxProjected[kMaxN64Vertices];		// Transformed and projected vertices (suitable for clipping etc)
 	u32					mVtxClipFlagsUnion;					// Bitwise OR of all the vertex flags added to the current batch. If this is 0, we can trivially accept everything without clipping
+#if DAEDALUS_MERGE_DRAWS
+	void				DrawPending();
+	DaedalusVtx *		mPendingVerts = nullptr;			// triangles prepared but not drawn yet
+	u32					mPendingCount = 0;
+	bool				mPendingDisableZ = false;
+	// RendererPSP copies a batch into mVtx_Save[320] for multi pass combiners
+	static const u32	kMaxMergedVerts = 320;
+#endif
 
 
 #ifdef DAEDALUS_DEBUG_DISPLAYLIST

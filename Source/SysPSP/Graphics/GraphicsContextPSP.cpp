@@ -88,6 +88,7 @@ struct SGuStateCache;
 static const u32	kFrameVertexBytes = 512 * 1024;
 static u8 *			gFrameVertices[2] = { nullptr, nullptr };
 static u32			gFrameVerticesUsed[2] = { 0, 0 };
+static u8 *			gFrameVerticesEnd = nullptr;	// exact end of the last allocation
 
 void * PSP_AllocFrameVertices( u32 bytes )
 {
@@ -98,7 +99,27 @@ void * PSP_AllocFrameVertices( u32 bytes )
 	if( offset + aligned > kFrameVertexBytes )
 		return nullptr;
 	gFrameVerticesUsed[ listNum ] = offset + aligned;
+	gFrameVerticesEnd = gFrameVertices[ listNum ] + offset + bytes;
 	return gFrameVertices[ listNum ] + offset;
+}
+
+// Allocates bytes starting exactly at expected, if that is where the last
+// allocation ended (no alignment gap; vertices only need 4 byte alignment).
+// Lets two triangle batches sit back to back and be drawn as one.
+void * PSP_AppendFrameVertices( void * expected, u32 bytes )
+{
+	if( !gDoubleDisplayEnabled || gFrameVertices[ listNum ] == nullptr || expected != gFrameVerticesEnd )
+		return nullptr;
+	u8 * const base = gFrameVertices[ listNum ];
+	const u32 offset = (u32)( (u8 *)expected - base );
+	if( offset > kFrameVertexBytes )
+		return nullptr;
+	const u32 aligned_end = ( offset + bytes + 15 ) & ~15u;
+	if( aligned_end > kFrameVertexBytes )
+		return nullptr;
+	gFrameVerticesUsed[ listNum ] = aligned_end;
+	gFrameVerticesEnd = base + offset + bytes;
+	return expected;
 }
 extern bool g32bitColorMode;
 extern bool gTakeScreenshotSS;
@@ -409,6 +430,7 @@ void IGraphicsContext::UpdateFrame( bool wait_for_vbl )
 		sceGuFinish(); //Display Frame
 		listNum ^= 1;	//Toggle lists 0 & 1
 		gFrameVerticesUsed[ listNum ] = 0;	// its last use finished at the sceGuSync above
+		gFrameVerticesEnd = nullptr;
 		sceGuStart(GU_CALL,list[listNum]); //Begin other Display List
 	}
 	else

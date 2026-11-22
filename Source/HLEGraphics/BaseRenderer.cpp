@@ -85,6 +85,7 @@ extern void sceGuSetMatrix(int type, const ScePspFMatrix4 * mtx);
 //   On PSP we again use sceGuGetMemory.
 #ifdef DAEDALUS_PSP
 void * PSP_AllocFrameVertices( u32 bytes );
+void * PSP_AppendFrameVertices( void * expected, u32 bytes );
 #include "SysPSP/Graphics/GuStateCache.h"
 #undef sceGuEnable
 #undef sceGuDisable
@@ -109,6 +110,9 @@ struct TempVerts
 	TempVerts()
 	:	Verts(NULL)
 	,	Count(0)
+#ifdef DAEDALUS_PSP
+	,	AppendTo(NULL)
+#endif
 	{
 	}
 
@@ -123,8 +127,14 @@ struct TempVerts
 	{
 		u32 bytes = count * sizeof(DaedalusVtx);
 #ifdef DAEDALUS_PSP
-		// Cached frame vertex memory if available (see PSP_AllocFrameVertices)
-		Verts = static_cast<DaedalusVtx*>(PSP_AllocFrameVertices(bytes));
+		// Cached frame vertex memory if available (see PSP_AllocFrameVertices).
+		// AppendTo: try to place the vertices right after earlier ones, so
+		// both can be drawn as one batch (see FlushTris)
+		Verts = nullptr;
+		if( AppendTo != nullptr )
+			Verts = static_cast<DaedalusVtx*>(PSP_AppendFrameVertices(AppendTo, bytes));
+		if( Verts == nullptr )
+			Verts = static_cast<DaedalusVtx*>(PSP_AllocFrameVertices(bytes));
 		if( Verts == nullptr )
 			Verts = static_cast<DaedalusVtx*>(sceGuGetMemory(bytes));
 #endif
@@ -138,6 +148,9 @@ struct TempVerts
 
 	DaedalusVtx *	Verts;
 	u32				Count;
+#ifdef DAEDALUS_PSP
+	DaedalusVtx *	AppendTo;
+#endif
 };
 
 
@@ -302,6 +315,9 @@ void BaseRenderer::Reset()
 {
 	mNumIndices = 0;
 	mVtxClipFlagsUnion = 0;
+#if DAEDALUS_MERGE_DRAWS
+	mPendingCount = 0;	// nothing may be held over from the previous frame
+#endif
 
 #ifdef DAEDALUS_DEBUG_DISPLAYLIST
 	mNumTrisRendered = 0;
@@ -594,6 +610,13 @@ void BaseRenderer::FlushTris()
 
 	TempVerts temp_verts;
 
+#if DAEDALUS_MERGE_DRAWS
+	const bool disable_z = gRDPOtherMode.depth_source ? true : false;
+	const bool can_merge = CanMergeDraws();
+	if( can_merge && mPendingCount != 0 && mPendingDisableZ == disable_z )
+		temp_verts.AppendTo = mPendingVerts + mPendingCount;
+#endif
+
 	// If any bit is set here it means we have to clip the trianlges since PSP HW clipping sux!
 	if(mVtxClipFlagsUnion != 0)
 	{
@@ -615,6 +638,28 @@ void BaseRenderer::FlushTris()
 	//
 	// Check for depth source, this is for Nascar games, hopefully won't mess up anything
 	DAEDALUS_ASSERT( !gRDPOtherMode.depth_source, " Warning : Using depth source in flushtris" );
+#if DAEDALUS_MERGE_DRAWS
+	if( can_merge )
+	{
+		mNumIndices = 0;
+		mVtxClipFlagsUnion = 0;
+		// Right after the held back triangles, same depth setting, and room
+		// left: extend that batch
+		if( mPendingCount != 0 && temp_verts.Verts == mPendingVerts + mPendingCount &&
+			mPendingDisableZ == disable_z && mPendingCount + temp_verts.Count <= kMaxMergedVerts )
+		{
+			mPendingCount += temp_verts.Count;
+			return;
+		}
+		// Otherwise draw what was held back and hold back this batch instead
+		FlushPendingDraw();
+		mPendingVerts = temp_verts.Verts;
+		mPendingCount = temp_verts.Count;
+		mPendingDisableZ = disable_z;
+		return;
+	}
+	FlushPendingDraw();
+#endif
 	//
 	//	Render out our vertices
 	RenderTriangles( temp_verts.Verts, temp_verts.Count, gRDPOtherMode.depth_source ? true : false );
@@ -622,6 +667,16 @@ void BaseRenderer::FlushTris()
 	mNumIndices = 0;
 	mVtxClipFlagsUnion = 0;
 }
+
+#if DAEDALUS_MERGE_DRAWS
+void BaseRenderer::DrawPending()
+{
+	DaedalusVtx * verts = mPendingVerts;
+	const u32 count = mPendingCount;
+	mPendingCount = 0;
+	RenderTriangles( verts, count, mPendingDisableZ );
+}
+#endif
 
 //*****************************************************************************
 //
@@ -2107,6 +2162,7 @@ inline void BaseRenderer::UpdateWorldProject()
 		mWorldProjectValid = true;
 		if( mReloadProj )
 		{
+			FlushPendingDraw();	// held back triangles use the current matrix
 			mReloadProj = false;
 			sceGuSetMatrix( GU_PROJECTION, reinterpret_cast< const ScePspFMatrix4 * >( &mProjectionMat) );
 		}
@@ -2128,6 +2184,7 @@ inline void BaseRenderer::UpdateWorldProject()
 			mWorldProject[2][0] *= HD_SCALE;  // Column 0, Row 2
 			mWorldProject[3][0] *= HD_SCALE;  // Column 0, Row 3
 		}
+		FlushPendingDraw();	// held back triangles use the current matrix
 		sceGuSetMatrix( GU_PROJECTION, reinterpret_cast< const ScePspFMatrix4 * >( &mWorldProject ) );
 		mModelViewStack[mModelViewTop] = glm::mat4(1.0f);;
 	}
