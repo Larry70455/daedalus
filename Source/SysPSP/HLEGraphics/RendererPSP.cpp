@@ -761,9 +761,34 @@ void RendererPSP::RenderUsingRenderSettings( const CBlendStates * states, Daedal
 	}
 }
 
+#if DAEDALUS_MERGE_DRAWS
+// Texture rectangles waiting to be drawn as one sprite list (see TexRect).
+// Two vertices per rectangle.
+static const u32	kMaxPendingRectVerts = 128;
+static DaedalusVtx	gPendingRectVerts[ kMaxPendingRectVerts ];
+static u32			gPendingRectTile = 0;
+
+void RendererPSP::DrawPendingRects( u32 count )
+{
+	DaedalusVtx * p_vertices = AllocVertices( count );
+	memcpy( p_vertices, gPendingRectVerts, count * sizeof( DaedalusVtx ) );
+	RenderUsingCurrentBlendMode( p_vertices, count, GU_SPRITES, GU_TRANSFORM_2D, mPendingDisableZ );
+}
+#endif
+
 void RendererPSP::TexRect( u32 tile_idx, const glm::vec2 & xy0, const glm::vec2 & xy1, TexCoord st0, TexCoord st1 )
 {
 	mTnL.Flags.Fog = 0;	//For now we force fog off for textrect, normally it should be fogged when depth_source is set //Corn
+
+#if DAEDALUS_MERGE_DRAWS
+	// Consecutive rectangles with the same tile and nothing else in between
+	// (DLParser_ProcessDList draws held back work before any other command)
+	// have identical state, so they are drawn as one sprite list. The held
+	// back ones are drawn first when this one cannot join them.
+	const bool rect_disable_z = gRDPOtherMode.depth_source ? false : true;
+	if( PendingIsRects() && ( gPendingRectTile != tile_idx || mPendingDisableZ != rect_disable_z || mPendingCount + 2 > kMaxPendingRectVerts ) )
+		FlushPendingDraw();
+#endif
 
 	UpdateTileSnapshots( tile_idx );
 
@@ -808,7 +833,28 @@ void RendererPSP::TexRect( u32 tile_idx, const glm::vec2 & xy0, const glm::vec2 
 	const f32 depth = gRDPOtherMode.depth_source ? mPrimDepth : 0.0f;
 
 #if 1	//1->SPRITE, 0->STRIP
+#if DAEDALUS_MERGE_DRAWS
+	DaedalusVtx * p_vertices;
+	const bool merge = CanMergeDraws();
+	if( merge )
+	{
+		if( !PendingIsRects() )
+		{
+			FlushPendingDraw();	// triangles held back are drawn first
+			mPendingRects = true;
+			mPendingDisableZ = rect_disable_z;
+			gPendingRectTile = tile_idx;
+		}
+		p_vertices = &gPendingRectVerts[ mPendingCount ];
+	}
+	else
+	{
+		FlushPendingDraw();
+		p_vertices = static_cast<DaedalusVtx *>(sceGuGetMemory(2 * sizeof(DaedalusVtx)));
+	}
+#else
 	DaedalusVtx * p_vertices = static_cast<DaedalusVtx *>(sceGuGetMemory(2 * sizeof(DaedalusVtx)));
+#endif
 
 	p_vertices[0].Position.x = screen0.x;
 	p_vertices[0].Position.y = screen0.y;
@@ -824,6 +870,13 @@ void RendererPSP::TexRect( u32 tile_idx, const glm::vec2 & xy0, const glm::vec2 
 	p_vertices[1].Texture.x = uv1.x;
 	p_vertices[1].Texture.y = uv1.y;
 
+#if DAEDALUS_MERGE_DRAWS
+	if( merge )
+	{
+		mPendingCount += 2;
+		return;
+	}
+#endif
 	RenderUsingCurrentBlendMode( p_vertices, 2, GU_SPRITES, GU_TRANSFORM_2D, gRDPOtherMode.depth_source ? false : true );
 #else
 	//	To be used with TRIANGLE_STRIP, which requires 40% less verts than TRIANGLE

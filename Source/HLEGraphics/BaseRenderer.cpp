@@ -613,7 +613,7 @@ void BaseRenderer::FlushTris()
 #if DAEDALUS_MERGE_DRAWS
 	const bool disable_z = gRDPOtherMode.depth_source ? true : false;
 	const bool can_merge = CanMergeDraws();
-	if( can_merge && mPendingCount != 0 && mPendingDisableZ == disable_z )
+	if( can_merge && mPendingCount != 0 && !mPendingRects && mPendingDisableZ == disable_z )
 		temp_verts.AppendTo = mPendingVerts + mPendingCount;
 #endif
 
@@ -645,7 +645,7 @@ void BaseRenderer::FlushTris()
 		mVtxClipFlagsUnion = 0;
 		// Right after the held back triangles, same depth setting, and room
 		// left: extend that batch
-		if( mPendingCount != 0 && temp_verts.Verts == mPendingVerts + mPendingCount &&
+		if( mPendingCount != 0 && !mPendingRects && temp_verts.Verts == mPendingVerts + mPendingCount &&
 			mPendingDisableZ == disable_z && mPendingCount + temp_verts.Count <= kMaxMergedVerts )
 		{
 			mPendingCount += temp_verts.Count;
@@ -656,6 +656,7 @@ void BaseRenderer::FlushTris()
 		mPendingVerts = temp_verts.Verts;
 		mPendingCount = temp_verts.Count;
 		mPendingDisableZ = disable_z;
+		mPendingRects = false;
 		return;
 	}
 	FlushPendingDraw();
@@ -674,7 +675,10 @@ void BaseRenderer::DrawPending()
 	DaedalusVtx * verts = mPendingVerts;
 	const u32 count = mPendingCount;
 	mPendingCount = 0;
-	RenderTriangles( verts, count, mPendingDisableZ );
+	if( mPendingRects )
+		DrawPendingRects( count );
+	else
+		RenderTriangles( verts, count, mPendingDisableZ );
 }
 #endif
 

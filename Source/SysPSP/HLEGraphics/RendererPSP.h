@@ -38,6 +38,7 @@ public:
 
 	virtual void		RenderTriangles( DaedalusVtx * p_vertices, u32 num_vertices, bool disable_zbuffer );
 	virtual bool		CanMergeDraws();
+	virtual void		DrawPendingRects( u32 count );
 
 	virtual void		TexRect( u32 tile_idx, const glm::vec2 & xy0, const glm::vec2 & xy1, TexCoord st0, TexCoord st1 );
 	virtual void		TexRectFlip( u32 tile_idx, const glm::vec2 & xy0, const glm::vec2 & xy1, TexCoord st0, TexCoord st1 );

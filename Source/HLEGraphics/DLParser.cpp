@@ -420,6 +420,7 @@ void DLParser_RDPPipeSync( MicroCodeCommand command );
 void DLParser_RDPTileSync( MicroCodeCommand command );
 void DLParser_RDPLoadSync( MicroCodeCommand command );
 void DLParser_Nothing( MicroCodeCommand command );
+void DLParser_TexRect( MicroCodeCommand command );
 
 // Commands that cannot change how already prepared triangles are drawn:
 // vertex loads (they only write the N64 vertex buffer; a projection change
@@ -453,8 +454,9 @@ static u32 DLParser_ProcessDList(u32 instruction_limit)
 		PROFILE_DL_CMD( command.inst.cmd );
 
 #if DAEDALUS_MERGE_DRAWS
-		if( gRenderer->HasPendingDraw() && !DLParser_KeepsPendingDraw( gUcodeFunc[ command.inst.cmd ] ) )
-			gRenderer->FlushPendingDraw();
+		if( gRenderer->HasPendingDraw() && !DLParser_KeepsPendingDraw( gUcodeFunc[ command.inst.cmd ] ) &&
+			!( gUcodeFunc[ command.inst.cmd ] == DLParser_TexRect && gRenderer->PendingIsRects() ) )
+			gRenderer->FlushPendingDraw();	// a TexRect decides itself whether it can join held back rectangles
 #endif
 		gUcodeFunc[ command.inst.cmd ]( command );
 

@@ -368,9 +368,11 @@ public:
 	// could change how they are drawn (see DLParser_ProcessDList).
 	inline void			FlushPendingDraw()						{ if( mPendingCount != 0 ) DrawPending(); }
 	inline bool			HasPendingDraw() const					{ return mPendingCount != 0; }
+	inline bool			PendingIsRects() const					{ return mPendingCount != 0 && mPendingRects; }
 #else
 	inline void			FlushPendingDraw()						{}
 	inline bool			HasPendingDraw() const					{ return false; }
+	inline bool			PendingIsRects() const					{ return false; }
 #endif
 	//void				Line3D( u32 v0, u32 v1, u32 width );
 
@@ -550,6 +552,8 @@ protected:
 	DaedalusVtx *		mPendingVerts = nullptr;			// triangles prepared but not drawn yet
 	u32					mPendingCount = 0;
 	bool				mPendingDisableZ = false;
+	bool				mPendingRects = false;				// true: texture rectangles (RendererPSP::TexRect), false: triangles
+	virtual void		DrawPendingRects( u32 count ) = 0;
 	// RendererPSP copies a batch into mVtx_Save[320] for multi pass combiners
 	static const u32	kMaxMergedVerts = 320;
 #endif
