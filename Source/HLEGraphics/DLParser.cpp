@@ -381,6 +381,10 @@ void DLParser_Finalise()
 //*****************************************************************************
 //
 //*****************************************************************************
+#if DAEDALUS_MERGE_DRAWS
+static void DLParser_RefreshKeepsPending();
+#endif
+
 void DLParser_InitMicrocode( u32 code_base, u32 code_size, u32 data_base, u32 data_size )
 {
 	if( !IsAddressValid(code_base, code_size, "InitMicrocode: ucode code") 
@@ -391,6 +395,9 @@ void DLParser_InitMicrocode( u32 code_base, u32 code_size, u32 data_base, u32 da
 	const UcodeInfo& ucode_info( GBIMicrocode_DetectVersion(code_base, code_size, data_base, data_size) );
 	gUcodeFunc = ucode_info.func;
 	gUcodeName = ucode_info.name;
+#if DAEDALUS_MERGE_DRAWS
+	DLParser_RefreshKeepsPending();
+#endif
 }
 
 //*****************************************************************************
@@ -436,11 +443,31 @@ static inline bool DLParser_KeepsPendingDraw( MicroCodeInstruction f )
 		   f == DLParser_RDPPipeSync || f == DLParser_RDPTileSync || f == DLParser_RDPLoadSync ||
 		   f == DLParser_GBI1_Noop || f == DLParser_GBI1_SpNoop || f == DLParser_Nothing;
 }
+
+// The same answer per command byte. The microcode table can be swapped or
+// rewritten in place (custom microcodes), so its contents are compared
+// each time the microcode is set up (once per display list).
+static MicroCodeInstruction	gKeepsPendingFuncs[ 256 ];
+static bool					gKeepsPending[ 256 ];
+static void DLParser_RefreshKeepsPending()
+{
+	if( memcmp( gKeepsPendingFuncs, gUcodeFunc, sizeof( gKeepsPendingFuncs ) ) == 0 )
+		return;
+	for( u32 i = 0; i < 256; ++i )
+	{
+		gKeepsPendingFuncs[ i ] = gUcodeFunc[ i ];
+		gKeepsPending[ i ] = DLParser_KeepsPendingDraw( gUcodeFunc[ i ] ) ||
+							 gUcodeFunc[ i ] == DLParser_TexRect;	// TexRect: checked in the loop
+	}
+}
 #endif
 
 static u32 DLParser_ProcessDList(u32 instruction_limit)
 {
 	MicroCodeCommand command;
+#if DAEDALUS_MERGE_DRAWS
+	DLParser_RefreshKeepsPending();
+#endif
 
 	u32 current_instruction_count = 0;
 
@@ -454,9 +481,13 @@ static u32 DLParser_ProcessDList(u32 instruction_limit)
 		PROFILE_DL_CMD( command.inst.cmd );
 
 #if DAEDALUS_MERGE_DRAWS
-		if( gRenderer->HasPendingDraw() && !DLParser_KeepsPendingDraw( gUcodeFunc[ command.inst.cmd ] ) &&
-			!( gUcodeFunc[ command.inst.cmd ] == DLParser_TexRect && gRenderer->PendingIsRects() ) )
-			gRenderer->FlushPendingDraw();	// a TexRect decides itself whether it can join held back rectangles
+		if( gRenderer->HasPendingDraw() )
+		{
+			const u32 cmd = command.inst.cmd;
+			if( !gKeepsPending[ cmd ] ||
+				( gUcodeFunc[ cmd ] == DLParser_TexRect && !gRenderer->PendingIsRects() ) )
+				gRenderer->FlushPendingDraw();	// a TexRect decides itself whether it can join held back rectangles
+		}
 #endif
 		gUcodeFunc[ command.inst.cmd ]( command );
 
