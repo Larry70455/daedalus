@@ -16,6 +16,15 @@
 #define _Temp4		(_AuxBase + 0x2C)
 #define _Events		(_AuxBase + 0x30)
 
+// Pinned N64 registers (DAEDALUS_PINNED_REGS in CodeGeneratorPSP.h, keep in
+// step): sp in s4, ra in s3, a0 in s2, v0 in s1 while generated code runs. Offsets of
+// the low words in gCPUState.CPU[].
+#define DAEDALUS_PINNED_REGS 1
+#define _GPR_SP		(29 * 8)
+#define _GPR_RA		(31 * 8)
+#define _GPR_A0		(4 * 8)
+#define _GPR_V0		(2 * 8)
+
 	.set noat
 
 	.extern HandleException_extern
@@ -123,6 +132,12 @@ _EnterDynaRec:
 	or		$s7, $a2, $0	# Read address table
 	or		$s6, $a3, $0	# Upper bound
 	lw		$s5, _Events($a1)	# Event countdown lives in s5 while generated code runs (see _DynaSyncOut)
+#if DAEDALUS_PINNED_REGS
+	lw		$s4, _GPR_SP($a1)	# pinned N64 registers
+	lw		$s3, _GPR_RA($a1)
+	lw		$s2, _GPR_A0($a1)
+	lw		$s1, _GPR_V0($a1)
+#endif
 
 	jr		$a0				# Jump to our target function
 	or		$fp, $a1, $0	# set frame pointer to Emulated CPU registers
@@ -154,6 +169,12 @@ _ReturnFromDynaRecIfStuffToDo:
 #	Every path that gets here has the counters in memory (see _DynaSyncOut)
 #
 _ReturnFromDynaRec:
+#if DAEDALUS_PINNED_REGS
+	sw		$s4, _GPR_SP($fp)	# pinned N64 registers back to gCPUState
+	sw		$s3, _GPR_RA($fp)
+	sw		$s2, _GPR_A0($fp)
+	sw		$s1, _GPR_V0($fp)
+#endif
 	lw		$ra, 0($sp)		# Restore our return address
 	lw		$fp, 4($sp)		# And s8
 	lw		$s0, 8($sp)
@@ -175,6 +196,12 @@ _ReturnFromDynaRec:
 #	Uses v0, v1. Generated code reloads s5 from memory after calling C.
 #
 _DynaSyncOut:
+#if DAEDALUS_PINNED_REGS
+	sw		$s4, _GPR_SP($fp)	# pinned N64 registers, for the C code about to run
+	sw		$s3, _GPR_RA($fp)
+	sw		$s2, _GPR_A0($fp)
+	sw		$s1, _GPR_V0($fp)
+#endif
 	lw		$v0, _Events($fp)		# countdown at the last sync
 	lw		$v1, _C0_Count($fp)		# COUNT at the last sync
 	subu	$v0, $v0, $s5			# cycles run since then
@@ -255,8 +282,7 @@ _DirectExitCheckCheckCount:
 #	a1 - CIndirectExitMap pointer
 #	a2 - exit pc (exit delay is always NO_DELAY)
 _IndirectExitCheck:
-	or		$s0, $a1, $0		# Keep track of map pointer
-	or		$s1, $a2, $0		# and the exit pc
+	or		$s0, $a1, $0		# Keep track of map pointer (the exit pc is kept in CurrentPC: s1 is a pinned register)
 
 	# Can avoid these until _ReturnFromDynaRec?
 	sw		$a2, _CurrentPC($fp) 	# CurrentPC
@@ -277,7 +303,7 @@ _IndirectExitCheck:
 
 	or		$a0, $s0, $0		# p_map
 	jal		IndirectExitMap_Lookup
-	or		$a1, $s1, $0		# exit_pc
+	lw		$a1, _CurrentPC($fp)	# exit_pc (unchanged: no event was taken, StuffToDo is clear)
 
 	# $v0 holds pointer to indirect target. If it's 0, it means it's not compiled yet
 	beq		$v0, $0,  _ReturnFromDynaRec

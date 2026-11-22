@@ -33,6 +33,15 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // Byte and halfword loads/stores reuse the cached "base + ram" register
 // (K0/K1) instead of recomputing the address: one instruction less each.
 // 0 restores the previous code.
+// Keep sp, ra and a0 in fixed PSP registers across fragments (see
+// CodeGeneratorPSP.cpp). 0 restores the previous code (and DynaRecStubs.S
+// must then not load/store them: it checks the same switch).
+#ifndef DAEDALUS_PINNED_REGS
+#define DAEDALUS_PINNED_REGS 1
+#endif
+
+struct SPinnedReg { EN64Reg N64; EPspReg Psp; };
+
 #ifndef DAEDALUS_SWIZZLE_USE_BASE_CACHE
 #define DAEDALUS_SWIZZLE_USE_BASE_CACHE 1
 #endif
@@ -282,6 +291,7 @@ private:
 				void				GenerateGenericR4300( OpCode op_code, CPU_Instruction p_instruction );
 				void				SyncCountersOut();
 				void				SyncCountersIn();
+				void				ReloadPinnedRegisters();
 				void				GenerateCountAdjust( bool forward, EPspReg t0, EPspReg t1 );
 				using ReadMemoryFunction = u32 (*)(u32 address, u32 current_pc );
 				using WriteMemoryFunction = void (*)( u32 address, u32 value, u32 current_pc );

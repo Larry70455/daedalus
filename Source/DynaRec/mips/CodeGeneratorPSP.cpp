@@ -272,6 +272,39 @@ void HandleException_extern()
 
 namespace
 {
+//*****************************************************************************
+// Pinned N64 registers (DAEDALUS_PINNED_REGS)
+//
+// N64 registers are normally loaded from gCPUState when a fragment first
+// uses them and stored back when it is done, in every fragment. The three
+// moved most often across fragments (sp, ra, a0: about 5% of all executed
+// generated instructions are their loads and stores) and v0 instead live in fixed
+// PSP registers for as long as generated code runs:
+// - every fragment starts with them cached, valid and clean, and its exits
+//   leave them in their PSP registers (FlushRegister does not store them);
+// - _EnterDynaRec loads them, _ReturnFromDynaRec and _DynaSyncOut (before
+//   any call into C) store them, so C code always sees current values;
+// - they are reloaded after calls that may change N64 registers
+//   (interpreter fallbacks and native functions, see ReloadPinnedRegisters).
+// S2-S4 are callee saved, so other C calls keep them. The DynaRecStubs.S
+// routines that use a callee saved scratch register only use S0.
+//*****************************************************************************
+const SPinnedReg	gPinnedRegs[] = {
+	{ N64Reg_SP, PspReg_S4 },
+	{ N64Reg_RA, PspReg_S3 },
+	{ N64Reg_A0, PspReg_S2 },
+	{ N64Reg_V0, PspReg_S1 },
+};
+
+static inline bool IsPinned( EN64Reg n64_reg )
+{
+#if DAEDALUS_PINNED_REGS
+	return n64_reg == N64Reg_SP || n64_reg == N64Reg_RA || n64_reg == N64Reg_A0 || n64_reg == N64Reg_V0;
+#else
+	return false;
+#endif
+}
+
 const EPspReg	gMemUpperBoundReg = PspReg_S6;
 const EPspReg	gMemoryBaseReg = PspReg_S7;
 
@@ -295,10 +328,12 @@ const EPspReg	gRegistersToUseForCaching[] =
 	PspReg_T8,
 	PspReg_T9,
 	PspReg_S0,
+#if !DAEDALUS_PINNED_REGS
 	PspReg_S1,
 	PspReg_S2,
 	PspReg_S3,
 	PspReg_S4,
+#endif
 //	PspReg_S5,		// Event countdown (Events[0].mCount) while generated code runs, see DAEDALUS_COUNTER_REG
 //	PspReg_S6,		// Memory upper bound
 //	PspReg_S7,		// Used for g_pu8RamBase - 0x80000000
@@ -336,6 +371,14 @@ void	CCodeGeneratorPSP::Initialise( u32 entry_address, u32 exit_address, u32 * h
 	mInstructionsExecuted = 0;
 
 	mpBasePointer = reinterpret_cast< const u8 * >( p_base );
+#if DAEDALUS_PINNED_REGS
+	for( const SPinnedReg & pin : gPinnedRegs )
+	{
+		mRegisterCache.SetCachedReg( pin.N64, 0, pin.Psp );
+		mRegisterCache.MarkAsValid( pin.N64, 0, true );
+		mRegisterCache.MarkAsDirty( pin.N64, 0, false );
+	}
+#endif
 	SetRegisterSpanList( register_usage, entry_address == exit_address );
 
 	mPreviousLoadBase = N64Reg_R0;	//Invalidate
@@ -371,6 +414,11 @@ void	CCodeGeneratorPSP::Finalise( ExceptionHandlerFn p_exception_handler_fn, con
 void	CCodeGeneratorPSP::SetRegisterSpanList( const SRegisterUsageInfo & register_usage, bool loops_to_self )
 {
 	mRegisterSpanList = register_usage.SpanList;
+#if DAEDALUS_PINNED_REGS
+	// Pinned registers are never allocated
+	mRegisterSpanList.erase( std::remove_if( mRegisterSpanList.begin(), mRegisterSpanList.end(),
+		[]( const SRegisterSpan & span ) { return IsPinned( span.Register ); } ), mRegisterSpanList.end() );
+#endif
 
 	// Sort in order of increasing start point
 	std::sort( mRegisterSpanList.begin(), mRegisterSpanList.end(), SAscendingSpanStartSort() );
@@ -1059,6 +1107,20 @@ void CCodeGeneratorPSP::FlushRegister( CN64RegisterCachePSP & cache, EN64Reg n64
 	// The high half is written to memory, or the low half is about to leave its register
 	if( lo_hi_idx == 1 || invalidate )
 		MaterializeHi( cache, n64_reg );
+
+	if( lo_hi_idx == 0 && IsPinned( n64_reg ) )
+	{
+		// Stays in its PSP register (see DAEDALUS_PINNED_REGS): only a known
+		// value has to be put there
+		if( cache.IsKnownValue( n64_reg, 0 ) )
+		{
+			LoadConstant( cache.GetCachedReg( n64_reg, 0 ), cache.GetKnownValue( n64_reg, 0 )._s32 );
+			cache.ClearKnownValue( n64_reg, 0 );
+			cache.MarkAsValid( n64_reg, 0, true );
+		}
+		cache.MarkAsDirty( n64_reg, 0, false );
+		return;
+	}
 
 	if( cache.IsDirty( n64_reg, lo_hi_idx ) )
 	{
@@ -2218,6 +2280,21 @@ void	CCodeGeneratorPSP::SyncCountersIn()
 	GetVar( PspReg_S5, (const u32*)&gCPUState.Events[0].mCount );
 }
 
+// After a call that may have changed N64 registers in gCPUState (the
+// interpreter, native functions): reload the pinned ones
+void	CCodeGeneratorPSP::ReloadPinnedRegisters()
+{
+#if DAEDALUS_PINNED_REGS
+	for( const SPinnedReg & pin : gPinnedRegs )
+	{
+		GetVar( pin.Psp, &gGPR[ pin.N64 ]._u32_0 );
+		mRegisterCache.ClearKnownValue( pin.N64, 0 );
+		mRegisterCache.MarkAsValid( pin.N64, 0, true );
+		mRegisterCache.MarkAsDirty( pin.N64, 0, false );
+	}
+#endif
+}
+
 // Move COUNT and the event countdown forward (before a call out of the
 // fragment) or back (after it returns) by the instructions this fragment has
 // already run. See DAEDALUS_EXACT_COUNT_READ. Uses (clobbers) t0 and t1.
@@ -2308,6 +2385,7 @@ void	CCodeGeneratorPSP::GenerateGenericR4300( OpCode op_code, CPU_Instruction p_
 	}
 #endif
 	SyncCountersIn();
+	ReloadPinnedRegisters();
 }
 
 
@@ -2319,6 +2397,7 @@ CJumpLocation CCodeGeneratorPSP::ExecuteNativeFunction( CCodeLabel speed_hack, b
 	SyncCountersOut();
 	JAL( speed_hack, true );
 	SyncCountersIn();
+	ReloadPinnedRegisters();
 
 	if( check_return )
 		return BEQ(PspReg_V0, PspReg_R0, CCodeLabel(nullptr), true);
