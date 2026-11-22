@@ -38,6 +38,12 @@ RendererPSP  * gRendererPSP = nullptr;
 
 extern void InitBlenderMode( u32 blender );
 
+// 1: polygons whose N64 blend result is the framebuffer unchanged only write
+// depth (fixes black polygons in Pokemon Stadium 2's Strength). 0: old code.
+#ifndef DAEDALUS_BLEND_KEEP_FRAMEBUFFER
+#define DAEDALUS_BLEND_KEEP_FRAMEBUFFER 1
+#endif
+
 #ifdef DAEDALUS_DEBUG_DISPLAYLIST
 
 // General blender used for Blend Explorer when debuging Dlists //Corn
@@ -459,6 +465,27 @@ void RendererPSP::RenderUsingCurrentBlendMode( DaedalusVtx * p_vertices, u32 num
 	//
 	if(cycle_mode < CYCLE_COPY && gRDPOtherMode.force_bl)
 	{
+#if DAEDALUS_BLEND_KEEP_FRAMEBUFFER
+		// The N64 blender computes (P * A + M * B) / (A + B). When the cycle
+		// that produces the final colour has A = 0, M = framebuffer memory and
+		// B = 1, the result is the framebuffer unchanged: the game draws only
+		// to write depth (Pokemon Stadium 2 does this when Strength starts,
+		// with black polygons). The default blend drew them as solid black.
+		// Here they leave every pixel as it is; depth is still written.
+		// Fields per cycle: A (m1b) bits 11-10 / 9-8, M (m2a) bits 7-6 / 5-4,
+		// B (m2b) bits 3-2 / 1-0. 2 cycle mode uses the second cycle.
+		const u32 bl = gRDPOtherMode.blender;
+		const u32 shift = ( cycle_mode == CYCLE_2CYCLE ) ? 0 : 2;
+		const u32 m1b = ( bl >> ( 8 + shift ) ) & 3;
+		const u32 m2a = ( bl >> ( 4 + shift ) ) & 3;
+		const u32 m2b = ( bl >> shift ) & 3;
+		if( m1b == 3 && m2a == 1 && m2b == 2 )	// A = 0, M = memory, B = 1
+		{
+			sceGuEnable( GU_BLEND );
+			sceGuBlendFunc( GU_ADD, GU_FIX, GU_FIX, 0, 0x00ffffff );	// source * 0 + destination * 1
+		}
+		else
+#endif
 		InitBlenderMode(gRDPOtherMode.blender);
 	}
 	else
