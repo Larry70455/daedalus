@@ -51,6 +51,9 @@ private:
 
   const Sample *volatile mReadPtr;
   Sample *volatile mWritePtr;
+#ifdef DAEDALUS_PSP
+	Sample	mLastDrained;	// last sample played (fade out on underrun)
+#endif
 };
 
 #endif // HLEAUDIO_AUDIOBUFFER_H_
