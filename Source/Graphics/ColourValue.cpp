@@ -92,7 +92,10 @@ inline u8 SubComponent( u8 a, u8 b )
 
 inline u8 ModulateComponent( u8 a, u8 b )
 {
-	return u8((u32(a) * u32(b) + 127) / 255);
+	// Same result as (a * b + 127) / 255 for every a and b (checked for all
+	// 65536 pairs), without the division: integer division is very slow on
+	// the PSP CPU and this runs four times per vertex colour.
+	return u8(((u32(a) * u32(b) + 128) * 257) >> 16);
 }
 
 inline u8 InterpolateComponent( u8 a, u8 b, float factor )
