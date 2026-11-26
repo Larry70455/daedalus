@@ -44,6 +44,7 @@
 	.global _DirectExitCheckNoDelay
 	.global _DirectExitCheckDelay
 	.global _IndirectExitCheck
+	.global _IndirectExitCached
 	.global _ReturnFromDynaRecIfStuffToDo
 	.global _DaedalusICacheInvalidate
 
@@ -311,6 +312,64 @@ _IndirectExitCheck:
 
 	jr		$v0
 	nop
+
+
+#######################################################################################
+#	Shared code for indirect exits (jr) from generated code: the same steps
+#	CCodeGeneratorPSP::GenerateIndirectExitCode used to emit at every indirect
+#	exit (about 40 instructions each, 16 of them on the hot path). Shared, it
+#	stays in the instruction cache. Event check, StuffToDo check, then the two
+#	entry cache of recent targets (CIndirectExitMap: mLastAddress, mLastTarget,
+#	mPrevAddress, mPrevTarget at offsets 0, 4, 8 and 12, checked by the code
+#	generator) before asking C. The caller has already updated the countdown.
+#	a1 - CIndirectExitMap pointer
+#	a2 - target pc (exit delay is always NO_DELAY)
+_IndirectExitCached:
+	blez	$s5, 3f					# an event is due
+	lw		$v1, _StuffToDo($fp)	# (delay slot, harmless if taken)
+	bne		$v1, $0, 2f				# StuffToDo already set
+	nop
+4:
+	lw		$v0, 0($a1)				# mLastAddress
+	bne		$v0, $a2, 1f
+	lw		$v1, 4($a1)				# mLastTarget (delay slot)
+	jr		$v1
+	nop
+1:
+	lw		$v0, 8($a1)				# mPrevAddress (the entry before the last one)
+	bne		$v0, $a2, 5f
+	lw		$v1, 12($a1)			# mPrevTarget (delay slot)
+	jr		$v1
+	nop
+5:	# Miss: look it up (and remember it); back to the dispatcher if not compiled
+	sw		$a2, _CurrentPC($fp)
+	sw		$0, _Delay($fp)
+	or		$a0, $a1, $0			# p_map
+	jal		IndirectExitMap_LookupAndCache
+	or		$a1, $a2, $0			# exit_pc (delay slot)
+	beq		$v0, $0, _SyncAndReturnFromDynaRec
+	nop
+	jr		$v0
+	nop
+2:	# StuffToDo already set: record where to resume and leave
+	sw		$a2, _CurrentPC($fp)
+	j		_SyncAndReturnFromDynaRec
+	sw		$0, _Delay($fp)
+3:	# An event is due
+	sw		$a2, _CurrentPC($fp)
+	sw		$0, _Delay($fp)
+	or		$s0, $a1, $0			# keep the map pointer (s0 holds nothing at an exit)
+	jal		_DynaSyncOut
+	nop
+	jal		CPU_HANDLE_COUNT_INTERRUPT
+	nop
+	lw		$s5, _Events($fp)		# the event queue changed
+	lw		$v0, _StuffToDo($fp)
+	bne		$v0, $0, _SyncAndReturnFromDynaRec
+	nop
+	lw		$a2, _CurrentPC($fp)
+	b		4b
+	or		$a1, $s0, $0			# (delay slot)
 
 
 #######################################################################################

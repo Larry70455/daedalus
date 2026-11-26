@@ -112,6 +112,13 @@ extern "C" { void _DynaSyncOut(); void _SyncAndReturnFromDynaRec(); }
 extern "C" { void _DirectExitCheckNoDelay( u32 instructions_executed, u32 exit_pc ); }
 extern "C" { void _DirectExitCheckDelay( u32 instructions_executed, u32 exit_pc, u32 target_pc ); }
 extern "C" { void _IndirectExitCheck( u32 instructions_executed, CIndirectExitMap * p_map, u32 target_pc ); }
+extern "C" { void _IndirectExitCached(); }	// a1 = map, a2 = target pc, see DynaRecStubs.S
+
+// 1: indirect exits jump to the shared _IndirectExitCached instead of
+// carrying their own copy of it (code size). 0: inline copy as before.
+#ifndef DAEDALUS_SHARED_INDIRECT_EXIT
+#define DAEDALUS_SHARED_INDIRECT_EXIT 1
+#endif
 
 extern "C"
 {
@@ -1499,6 +1506,22 @@ void CCodeGeneratorPSP::GenerateEretExitCode( u32 num_instructions, CIndirectExi
 void CCodeGeneratorPSP::GenerateIndirectExitCode( u32 num_instructions, CIndirectExitMap * p_map )
 {
 	FlushAllRegisters( mRegisterCache, false );
+
+#if DAEDALUS_INLINE_EXIT_CHECK && DAEDALUS_SHARED_INDIRECT_EXIT
+	// The shared stub reads the map's cache words at fixed offsets
+	const u8 * map_start = reinterpret_cast< const u8 * >( p_map );
+	if( reinterpret_cast< const u8 * >( &p_map->mLastAddress ) == map_start &&
+		reinterpret_cast< const u8 * >( &p_map->mLastTarget ) == map_start + 4 &&
+		reinterpret_cast< const u8 * >( &p_map->mPrevAddress ) == map_start + 8 &&
+		reinterpret_cast< const u8 * >( &p_map->mPrevTarget ) == map_start + 12 )
+	{
+		GetVar( PspReg_A2, &gCPUState.TargetPC );
+		LoadConstant( PspReg_A1, reinterpret_cast< s32 >( p_map ) );
+		J( CCodeLabel( reinterpret_cast< const void * >( _IndirectExitCached ) ), false );
+		ADDIU( PspReg_S5, PspReg_S5, -s16( num_instructions ) );	// delay slot: event countdown, see SyncCountersOut
+		return;
+	}
+#endif
 
 #if DAEDALUS_INLINE_EXIT_CHECK
 	{
