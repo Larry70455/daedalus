@@ -136,6 +136,9 @@ static bool FetchLikelyDelaySlot( u32 address, STraceEntry * p_entry )
 //*************************************************************************************
 static const u32 kNumCodePages = ( 8 * 1024 * 1024 ) >> 12;
 
+// Filled by the code generator while a fragment is assembled (see above)
+std::vector< std::pair< u32, u32 > >	gDeadExitScanRanges;
+
 static void AddCodePage( std::vector< u16 > & pages, u32 address )
 {
 	u32 index = ( address - 0x80000000 ) >> 12;
@@ -201,7 +204,19 @@ CFragment::CFragment( std::shared_ptr<CCodeBufferManager> p_manager,
 	}
 	FinishCodePages( mCodePages );
 
+	gDeadExitScanRanges.clear();
 	Assemble( p_manager, exit_address, trace, branch_details, register_usage );
+
+	// Code at exit targets that the code generator read to leave out dead
+	// register stores (CCodeGeneratorPSP::DropDeadExitRegisters): if it
+	// changes, this fragment is stale too
+	if( !gDeadExitScanRanges.empty() )
+	{
+		for( const auto & r : gDeadExitScanRanges )
+			AddCodeRange( mCodePages, r.first, r.second );
+		FinishCodePages( mCodePages );
+		gDeadExitScanRanges.clear();
+	}
 }
 
 #ifdef DAEDALUS_ENABLE_OS_HOOKS

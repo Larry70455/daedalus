@@ -116,6 +116,16 @@ extern "C" { void _IndirectExitCached(); }	// a1 = map, a2 = target pc, see Dyna
 
 // 1: indirect exits jump to the shared _IndirectExitCached instead of
 // carrying their own copy of it (code size). 0: inline copy as before.
+// 1: an exit does not write back registers that the code it goes to
+// overwrites before reading (see N64DeadRegistersAt). 0: store all.
+#ifndef DAEDALUS_DEAD_EXIT_STORES
+#define DAEDALUS_DEAD_EXIT_STORES 1
+#endif
+// Test mode for the above: dead registers get garbage values (0xDEADBEEF)
+#ifndef DAEDALUS_DEAD_EXIT_STORES_POISON
+#define DAEDALUS_DEAD_EXIT_STORES_POISON 0
+#endif
+
 #ifndef DAEDALUS_SHARED_INDIRECT_EXIT
 #define DAEDALUS_SHARED_INDIRECT_EXIT 1
 #endif
@@ -1304,6 +1314,219 @@ void	CCodeGeneratorPSP::RestoreAllRegisters( CN64RegisterCachePSP & current_cach
 
 //
 
+#if DAEDALUS_DEAD_EXIT_STORES
+//
+// Which N64 registers an instruction reads and writes, for the dead store
+// scan below. Strict whitelist: anything not listed (traps, COP0, cache,
+// syscall, LL/SC, patched opcodes, ...) returns -1 and ends the scan.
+// Returns 0 for a plain instruction, 1 for a branch whose delay slot runs
+// whether or not it is taken (scan the delay slot, then stop), 2 for a
+// branch likely (stop now: its delay slot does not always run).
+//
+static s32 N64RegisterEffects( u32 w, u32 * p_reads, u32 * p_writes )
+{
+	const u32 op = w >> 26, rs = ( w >> 21 ) & 31, rt = ( w >> 16 ) & 31, rd = ( w >> 11 ) & 31, fn = w & 63;
+	const u32 RS = 1u << rs, RT = 1u << rt, RD = 1u << rd, RA = 1u << 31;
+	u32 r = 0, wr = 0; s32 kind = 0;
+	switch( op )
+	{
+	case 0:	// SPECIAL
+		switch( fn )
+		{
+		case 0: case 2: case 3: case 56: case 58: case 59: case 60: case 62: case 63:	// shifts by sa
+			r = RT; wr = RD; break;
+		case 4: case 6: case 7: case 20: case 22: case 23:	// shifts by register
+			r = RS | RT; wr = RD; break;
+		case 8:  r = RS; kind = 1; break;				// JR
+		case 9:  r = RS; wr = RD; kind = 1; break;		// JALR
+		case 16: case 18: wr = RD; break;				// MFHI, MFLO
+		case 17: case 19: r = RS; break;				// MTHI, MTLO
+		case 24: case 25: case 26: case 27: case 28: case 29: case 30: case 31:	// mult / div
+			r = RS | RT; break;
+		case 33: case 35: case 36: case 37: case 38: case 39: case 42: case 43: case 45: case 47:	// ALU, no traps
+			r = RS | RT; wr = RD; break;
+		default: return -1;
+		}
+		break;
+	case 1:	// REGIMM
+		switch( rt )
+		{
+		case 0: case 1:   r = RS; kind = 1; break;				// BLTZ, BGEZ
+		case 2: case 3:   r = RS; kind = 2; break;				// likely
+		case 16: case 17: r = RS; wr = RA; kind = 1; break;	// BLTZAL, BGEZAL
+		case 18: case 19: r = RS; kind = 2; break;				// likely and link (write not counted)
+		default: return -1;
+		}
+		break;
+	case 2:  kind = 1; break;								// J
+	case 3:  wr = RA; kind = 1; break;						// JAL
+	case 4: case 5:   r = RS | RT; kind = 1; break;			// BEQ, BNE
+	case 6: case 7:   r = RS; kind = 1; break;				// BLEZ, BGTZ
+	case 20: case 21: r = RS | RT; kind = 2; break;			// BEQL, BNEL
+	case 22: case 23: r = RS; kind = 2; break;				// BLEZL, BGTZL
+	case 9: case 10: case 11: case 12: case 13: case 14: case 25:	// ADDIU SLTI SLTIU ANDI ORI XORI DADDIU
+		r = RS; wr = RT; break;
+	case 15: wr = RT; break;								// LUI
+	case 32: case 33: case 35: case 36: case 37: case 39: case 55:	// LB LH LW LBU LHU LWU LD
+		r = RS; wr = RT; break;
+	case 34: case 38: case 26: case 27:						// LWL LWR LDL LDR (merge into rt)
+		r = RS | RT; wr = RT; break;
+	case 40: case 41: case 43: case 63: case 42: case 46: case 44: case 45:	// stores
+		r = RS | RT; break;
+	case 49: case 53: case 57: case 61:						// LWC1 LDC1 SWC1 SDC1
+		r = RS; break;
+	case 17:	// COP1
+		switch( rs )
+		{
+		case 0: case 1: case 2: wr = RT; break;				// MFC1 DMFC1 CFC1
+		case 4: case 5: case 6: r = RT; break;				// MTC1 DMTC1 CTC1
+		case 8: kind = ( rt & 2 ) ? 2 : 1; break;			// BC1F/T (likely if bit 1)
+		case 16: case 17: case 20: case 21: break;			// FPU arithmetic: no GPRs
+		default: return -1;
+		}
+		break;
+	default: return -1;
+	}
+	*p_reads = r; *p_writes = wr;
+	return kind;
+}
+
+//
+// Registers that the N64 code at address writes before reading them, on
+// every path from there: their values at this point are never used, so an
+// exit to address does not need to store them. Follows both sides of
+// conditional branches and into J/JAL targets, at most 96 instructions and
+// 4 branches deep; a path that ends any other way (JR, an instruction not
+// in the whitelist, the limits) leaves its undecided registers live. Only
+// code in the first 8 MB of KSEG0, where fragments track the code pages
+// they depend on: every range read is recorded (gDeadExitScanRanges) so
+// this fragment is dropped if that code changes (overlays).
+//
+extern std::vector< std::pair< u32, u32 > >	gDeadExitScanRanges;
+
+static bool N64FetchForScan( u32 pc, u32 * p_word )
+{
+	if( pc < 0x80000000 || pc >= 0x80800000 || ( pc & 3 ) )
+		return false;
+	const MemFuncRead & m( g_MemoryLookupTableRead[ pc >> 18 ] );
+	if( m.pRead == nullptr )
+		return false;
+	*p_word = *reinterpret_cast< const u32 * >( m.pRead + pc );
+	gDeadExitScanRanges.emplace_back( pc, 4 );
+	return true;
+}
+
+static u32 N64BranchTarget( u32 pc, u32 w )
+{
+	const u32 op = w >> 26;
+	if( op == 2 || op == 3 )
+		return ( ( pc + 4 ) & 0xF0000000 ) | ( ( w & 0x03FFFFFF ) << 2 );
+	return pc + 4 + ( u32( s32( s16( w & 0xFFFF ) ) ) << 2 );
+}
+
+// decided: registers already read or written on this path (r0 always)
+static u32 N64DeadFrom( u32 pc, u32 decided, s32 & budget, u32 depth )
+{
+	u32 dead = 0;
+	while( budget-- > 0 )
+	{
+		u32 w, reads = 0, writes = 0;
+		if( !N64FetchForScan( pc, &w ) )
+			return dead;
+		const s32 kind = N64RegisterEffects( w, &reads, &writes );
+		if( kind < 0 )
+			return dead;
+		decided |= reads;
+		dead |= writes & ~decided;
+		decided |= writes;
+		if( kind == 0 )
+		{
+			pc += 4;
+			continue;
+		}
+
+		const u32 op = w >> 26;
+		const bool is_jr = ( op == 0 );					// JR, JALR: target unknown
+		const bool is_j = ( op == 2 || op == 3 );		// J, JAL: always taken
+		const u32 target = is_jr ? 0 : N64BranchTarget( pc, w );
+
+		if( kind == 2 )
+		{
+			// Branch likely: taken runs the delay slot then the target,
+			// not taken skips the delay slot
+			if( depth >= 4 )
+				return dead;
+			u32 dw, dr = 0, dwr = 0;
+			if( !N64FetchForScan( pc + 4, &dw ) || N64RegisterEffects( dw, &dr, &dwr ) != 0 )
+				return dead;
+			--budget;
+			u32 decided_t = decided | dr;
+			u32 dead_t = dwr & ~decided_t;
+			decided_t |= dwr;
+			dead_t |= N64DeadFrom( target, decided_t, budget, depth + 1 );
+			const u32 dead_n = N64DeadFrom( pc + 8, decided, budget, depth + 1 );
+			return dead | ( dead_t & dead_n );
+		}
+
+		// Delay slot: runs on both paths
+		u32 dw, dr = 0, dwr = 0;
+		if( !N64FetchForScan( pc + 4, &dw ) || N64RegisterEffects( dw, &dr, &dwr ) != 0 )
+			return dead;
+		--budget;
+		decided |= dr;
+		dead |= dwr & ~decided;
+		decided |= dwr;
+
+		if( is_jr )
+			return dead;
+		if( is_j )
+		{
+			pc = target;
+			continue;
+		}
+		if( depth >= 4 )
+			return dead;
+		const u32 dead_t = N64DeadFrom( target, decided, budget, depth + 1 );
+		const u32 dead_n = N64DeadFrom( pc + 8, decided, budget, depth + 1 );
+		return dead | ( dead_t & dead_n );
+	}
+	return dead;
+}
+
+static u32 N64DeadRegistersAt( u32 address )
+{
+	s32 budget = 96;
+	return N64DeadFrom( address, 1u, budget, 0 ) & ~1u;
+}
+
+// Before an exit to address: registers dead there are not written back
+void CCodeGeneratorPSP::DropDeadExitRegisters( u32 address )
+{
+	const u32 dead = N64DeadRegistersAt( address );
+	for( u32 i = 1; i < NUM_N64_REGS; ++i )
+	{
+		if( ( dead & ( 1u << i ) ) == 0 )
+			continue;
+		const EN64Reg n64_reg = EN64Reg( i );
+		mRegisterCache.SetHiSignExtendPending( n64_reg, false );
+		mRegisterCache.MarkAsDirty( n64_reg, 0, false );
+		mRegisterCache.MarkAsDirty( n64_reg, 1, false );
+#if DAEDALUS_DEAD_EXIT_STORES_POISON
+		// Test mode: put garbage in the dead register instead. If the scan
+		// were ever wrong, the game would read it and go off course.
+		if( IsPinned( n64_reg ) )
+		{
+			LoadConstant( mRegisterCache.GetCachedReg( n64_reg, 0 ), 0xDEADBEEF );
+			mRegisterCache.ClearKnownValue( n64_reg, 0 );
+		}
+		else
+			SetVar( &gGPR[ n64_reg ]._u32_0, 0xDEADBEEF );
+		SetVar( &gGPR[ n64_reg ]._u32_1, 0xBAADF00D );
+#endif
+	}
+}
+#endif
+
 CJumpLocation CCodeGeneratorPSP::GenerateExitCode( u32 exit_address, u32 jump_address, u32 num_instructions, CCodeLabel next_fragment )
 {
 	#ifdef DAEDALUS_ENABLE_ASSERTS
@@ -1366,6 +1589,10 @@ CJumpLocation CCodeGeneratorPSP::GenerateExitCode( u32 exit_address, u32 jump_ad
 		return CJumpLocation( nullptr );
 	}
 
+#if DAEDALUS_DEAD_EXIT_STORES
+	if( jump_address == 0 )
+		DropDeadExitRegisters( exit_address );	// execution resumes at exit_address
+#endif
 	const u32 flush_start = GetAssemblyBuffer()->GetSize();
 	FlushAllRegisters( mRegisterCache, true );
 

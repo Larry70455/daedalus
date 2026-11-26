@@ -282,6 +282,7 @@ private:
 				void				MaterializeHi( CN64RegisterCachePSP & cache, EN64Reg n64_reg );
 				void				MaterializeAllHi( CN64RegisterCachePSP & cache );
 				void				FlushAllRegisters( CN64RegisterCachePSP & cache, bool invalidate );
+				void				DropDeadExitRegisters( u32 address );
 				void				FlushAllFloatingPointRegisters( CN64RegisterCachePSP & cache, bool invalidate );
 				void				FlushAllTemporaryRegisters( CN64RegisterCachePSP & cache, bool invalidate );
 
