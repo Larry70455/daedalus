@@ -311,8 +311,117 @@ void 	CAssemblyWriterPSP::JR( EPspReg reg_link, bool insert_delay )
 
 //
 
+
+//*****************************************************************************
+// Branch delay slot filling (DAEDALUS_FILL_BRANCH_DELAY)
+//
+// A conditional branch emitted with insert_delay used to get a NOP in its
+// delay slot: about 5% of all executed generated instructions in a Pokemon
+// Stadium 2 battle, and code size (instruction cache misses). When the
+// instruction just before the branch can safely run after it instead, the
+// branch is written in its place and that instruction goes into the delay
+// slot. It still runs exactly once on both paths, before any code at the
+// branch target, so the result is the same. It is moved only when:
+//  - nothing can jump to it or patch it: no label or jump location was
+//    taken at or after its position (CAssemblyBuffer::GetLastMarkPos), which
+//    also keeps fragment entry points and loop tops in place;
+//  - it is a plain ALU, load or store instruction that we can decode (not a
+//    branch, jump, syscall or anything unknown) and is not itself in the
+//    delay slot of a branch or jump;
+//  - it does not write a register the branch reads.
+// Branch likely instructions annul their delay slot, so they keep the NOP.
+//*****************************************************************************
+#ifndef DAEDALUS_FILL_BRANCH_DELAY
+#define DAEDALUS_FILL_BRANCH_DELAY 1
+#endif
+
+#if DAEDALUS_FILL_BRANCH_DELAY
+// True for any branch or jump (anything with a delay slot)
+static bool IsControlTransfer( u32 w )
+{
+	const u32 op = w >> 26;
+	if( op == OP_SPECOP )
+	{
+		const u32 fn = w & 0x3f;
+		return fn == SpecOp_JR || fn == SpecOp_JALR;
+	}
+	if( op == OP_REGIMM || op == OP_J || op == OP_JAL ) return true;
+	if( op >= OP_BEQ && op <= OP_BGTZ ) return true;			// beq bne blez bgtz
+	if( op >= OP_BEQL && op <= OP_BGTZL ) return true;		// likely versions
+	if( ( op == OP_COPRO1 || op == OP_COPRO1 + 1 ) && ( ( w >> 21 ) & 0x1f ) == 8 ) return true;	// bc1x, VFPU bvf/bvt
+	return false;
+}
+
+// The general purpose register an instruction writes (0 for none). Returns
+// false for anything it does not know, which is then never moved.
+static bool GetWrittenRegister( u32 w, u32 * p_reg )
+{
+	const u32 op = w >> 26;
+	const u32 rt = ( w >> 16 ) & 0x1f;
+	const u32 rd = ( w >> 11 ) & 0x1f;
+	switch( op )
+	{
+	case OP_SPECOP:
+		switch( w & 0x3f )
+		{
+		case SpecOp_SLL: case SpecOp_SRL: case SpecOp_SRA:
+		case SpecOp_SLLV: case SpecOp_SRLV: case SpecOp_SRAV:
+		case SpecOp_MFHI: case SpecOp_MFLO:
+		case SpecOp_ADD: case SpecOp_ADDU: case SpecOp_SUB: case SpecOp_SUBU:
+		case SpecOp_AND: case SpecOp_OR: case SpecOp_XOR: case SpecOp_NOR:
+		case SpecOp_SLT: case SpecOp_SLTU:
+			*p_reg = rd; return true;
+		case SpecOp_MULT: case SpecOp_MULTU: case SpecOp_DIV: case SpecOp_DIVU:
+		case SpecOp_MTHI: case SpecOp_MTLO:
+			*p_reg = 0; return true;		// only hi/lo
+		default:
+			return false;
+		}
+	case OP_ADDI: case OP_ADDIU: case OP_SLTI: case OP_SLTIU:
+	case OP_ANDI: case OP_ORI: case OP_XORI: case OP_LUI:
+	case OP_LB: case OP_LH: case OP_LW: case OP_LBU: case OP_LHU:
+		*p_reg = rt; return true;
+	case OP_SB: case OP_SH: case OP_SW: case OP_SWC1:
+		*p_reg = 0; return true;
+	case OP_LWC1:
+		*p_reg = 0; return true;		// writes a float register
+	default:
+		return false;
+	}
+}
+#endif
+
+// When the previous instruction in the current buffer can go into the delay
+// slot of a branch that reads registers a and b: removes it from the buffer
+// and returns it (the caller appends it after the branch). Otherwise returns
+// false and leaves the buffer alone.
+bool	CAssemblyWriterPSP::TakeDelaySlotOp( EPspReg a, EPspReg b, PspOpCode * p_op )
+{
+#if DAEDALUS_FILL_BRANCH_DELAY
+	const u32 pos = mpCurrentBuffer->GetSize();
+	if( pos < 8 ) return false;
+	const u32 prev_pos = pos - 4;
+	if( mpCurrentBuffer->GetLastMarkPos() >= prev_pos ) return false;	// may be jumped to or patched
+	const u32 prev = mpCurrentBuffer->GetWordAt( prev_pos );
+	if( prev == 0 ) return false;
+	if( IsControlTransfer( mpCurrentBuffer->GetWordAt( prev_pos - 4 ) ) ) return false;	// it is a delay slot
+	if( IsControlTransfer( prev ) ) return false;
+	u32 written;
+	if( !GetWrittenRegister( prev, &written ) ) return false;
+	if( written != 0 && ( written == u32( a ) || written == u32( b ) ) ) return false;
+	mpCurrentBuffer->Truncate( prev_pos );
+	p_op->_u32 = prev;
+	return true;
+#else
+	return false;
+#endif
+}
+
 CJumpLocation	CAssemblyWriterPSP::BranchOp( EPspReg a, OpCodeValue op, EPspReg b, CCodeLabel target, bool insert_delay )
 {
+	PspOpCode		delay_op {};
+	const bool		likely( op == OP_BEQL || op == OP_BNEL || op == OP_BLEZL || op == OP_BGTZL );
+	const bool		filled( insert_delay && !likely && TakeDelaySlotOp( a, b, &delay_op ) );
 	CJumpLocation	branch_location( mpCurrentBuffer->GetJumpLocation() );
 	s32				offset( branch_location.GetOffset( target ) );
 
@@ -324,7 +433,11 @@ CJumpLocation	CAssemblyWriterPSP::BranchOp( EPspReg a, OpCodeValue op, EPspReg b
 	op_code.offset = s16((offset - 4) >> 2);	// Adjust for incremented PC and ignore lower bits
 	AppendOp( op_code );
 
-	if(insert_delay)
+	if( filled )
+	{
+		AppendOp( delay_op );
+	}
+	else if(insert_delay)
 	{
 		// Stuff a nop in the delay slot
 		op_code._u32 = 0;
@@ -387,6 +500,10 @@ CJumpLocation	CAssemblyWriterPSP::BGTZ( EPspReg a, CCodeLabel target, bool inser
 
 CJumpLocation	CAssemblyWriterPSP::BranchRegImmOp( EPspReg a, ERegImmOp op, CCodeLabel target, bool insert_delay )
 {
+	PspOpCode		delay_op {};
+	const bool		likely( op == RegImmOp_BLTZL || op == RegImmOp_BGEZL || op == RegImmOp_BLTZALL || op == RegImmOp_BGEZALL );
+	const bool		link( op == RegImmOp_BLTZAL || op == RegImmOp_BGEZAL || op == RegImmOp_BLTZALL || op == RegImmOp_BGEZALL );
+	const bool		filled( insert_delay && !likely && !link && TakeDelaySlotOp( a, PspReg_R0, &delay_op ) );
 	CJumpLocation	branch_location( mpCurrentBuffer->GetJumpLocation() );
 	s32				offset( branch_location.GetOffset( target ) );
 
@@ -398,7 +515,11 @@ CJumpLocation	CAssemblyWriterPSP::BranchRegImmOp( EPspReg a, ERegImmOp op, CCode
 	op_code.offset = s16((offset - 4) >> 2);	// Adjust for incremented PC and ignore lower bits
 	AppendOp( op_code );
 
-	if(insert_delay)
+	if( filled )
+	{
+		AppendOp( delay_op );
+	}
+	else if(insert_delay)
 	{
 		// Stuff a nop in the delay slot
 		op_code._u32 = 0;

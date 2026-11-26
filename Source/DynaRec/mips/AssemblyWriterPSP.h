@@ -175,6 +175,7 @@ class CAssemblyWriterPSP
 		}
 
 	private:
+		bool				TakeDelaySlotOp( EPspReg a, EPspReg b, PspOpCode * p_op );
 		CJumpLocation		BranchOp( EPspReg a, OpCodeValue op, EPspReg b, CCodeLabel target, bool insert_delay );
 		CJumpLocation		BranchRegImmOp( EPspReg a, ERegImmOp op, CCodeLabel target, bool insert_delay );
 		void				SpecOpLogical( EPspReg rd, EPspReg rs, ESpecOp op, EPspReg rt );

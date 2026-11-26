@@ -112,6 +112,13 @@ extern "C" { void _DynaSyncOut(); void _SyncAndReturnFromDynaRec(); }
 extern "C" { void _DirectExitCheckNoDelay( u32 instructions_executed, u32 exit_pc ); }
 extern "C" { void _DirectExitCheckDelay( u32 instructions_executed, u32 exit_pc, u32 target_pc ); }
 extern "C" { void _IndirectExitCheck( u32 instructions_executed, CIndirectExitMap * p_map, u32 target_pc ); }
+extern "C" { void _IndirectExitCached(); }	// a1 = map, a2 = target pc, see DynaRecStubs.S
+
+// 1: indirect exits jump to the shared _IndirectExitCached instead of
+// carrying their own copy of it (code size). 0: inline copy as before.
+#ifndef DAEDALUS_SHARED_INDIRECT_EXIT
+#define DAEDALUS_SHARED_INDIRECT_EXIT 1
+#endif
 
 extern "C"
 {
@@ -955,6 +962,12 @@ inline void CCodeGeneratorPSP::SetRegister( EN64Reg n64_reg, u32 lo_hi_idx, u32 
 // written by a 32 bit instruction in another fragment gets a stale upper
 // half, so the option can be turned off per game.
 //*****************************************************************************
+// 1: in 32 bit mode, a zero upper half (from LBU, ANDI, SLT, ...) is not
+// written back either (see UpdateRegister). 0: it is, as before.
+#ifndef DAEDALUS_32BIT_SKIP_HI_ZERO
+#define DAEDALUS_32BIT_SKIP_HI_ZERO 1
+#endif
+
 void CCodeGeneratorPSP::ForgetHi( EN64Reg n64_reg )
 {
 	mRegisterCache.SetHiSignExtendPending( n64_reg, false );
@@ -1000,6 +1013,17 @@ void CCodeGeneratorPSP::UpdateRegister( EN64Reg n64_reg, EPspReg psp_reg, bool o
 	else	// == URO_HI_CLEAR
 	{
 		SetRegister( n64_reg, 1, 0 );
+#if DAEDALUS_32BIT_SKIP_HI_ZERO
+		// 32 bit mode: the zero upper half stays known inside this fragment
+		// (64 bit instructions here still see it), but is not written back,
+		// the same as the upper half of sign extended 32 bit results (see
+		// ForgetHi). These stores were about half of the remaining upper half
+		// stores, mostly in exit code.
+		// Only when the upper half has no PSP register of its own (loops
+		// that cache it expect that register to hold the value at the top).
+		if( gDynarec32BitMode && !mRegisterCache.IsCached( n64_reg, 1 ) )
+			mRegisterCache.MarkAsDirty( n64_reg, 1, false );
+#endif
 	}
 }
 
@@ -1482,6 +1506,22 @@ void CCodeGeneratorPSP::GenerateEretExitCode( u32 num_instructions, CIndirectExi
 void CCodeGeneratorPSP::GenerateIndirectExitCode( u32 num_instructions, CIndirectExitMap * p_map )
 {
 	FlushAllRegisters( mRegisterCache, false );
+
+#if DAEDALUS_INLINE_EXIT_CHECK && DAEDALUS_SHARED_INDIRECT_EXIT
+	// The shared stub reads the map's cache words at fixed offsets
+	const u8 * map_start = reinterpret_cast< const u8 * >( p_map );
+	if( reinterpret_cast< const u8 * >( &p_map->mLastAddress ) == map_start &&
+		reinterpret_cast< const u8 * >( &p_map->mLastTarget ) == map_start + 4 &&
+		reinterpret_cast< const u8 * >( &p_map->mPrevAddress ) == map_start + 8 &&
+		reinterpret_cast< const u8 * >( &p_map->mPrevTarget ) == map_start + 12 )
+	{
+		GetVar( PspReg_A2, &gCPUState.TargetPC );
+		LoadConstant( PspReg_A1, reinterpret_cast< s32 >( p_map ) );
+		J( CCodeLabel( reinterpret_cast< const void * >( _IndirectExitCached ) ), false );
+		ADDIU( PspReg_S5, PspReg_S5, -s16( num_instructions ) );	// delay slot: event countdown, see SyncCountersOut
+		return;
+	}
+#endif
 
 #if DAEDALUS_INLINE_EXIT_CHECK
 	{
