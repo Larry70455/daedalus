@@ -317,8 +317,8 @@ static void WriteInterpretedHot()
 			 gStats[ kStatPartialInvalidate ], gStats[ kStatFragmentsDropped ] );
 	fprintf( fh, "# stale code check: %u osInvalICache calls verified without a flush, %u stale compiled instructions found (must be 0)\n", gStats[ kStatInvalChecks ], gStats[ kStatStaleOps ] );
 	fprintf( fh, "# audio underruns (output ran dry, heard as crackle): %u\n", gStats[ kStatAudioUnderrun ] );
-	fprintf( fh, "# async audio: %u lists run on the Media Engine, %u on the main CPU because the Media Engine was still busy\n",
-			 gStats[ kStatAudioMeJobs ], gStats[ kStatAudioMeBusy ] );
+	fprintf( fh, "# async audio: %u lists run on the Media Engine, the main CPU waited for it %u times, %u ms in total\n",
+			 gStats[ kStatAudioMeJobs ], gStats[ kStatAudioMeBusy ], gStats[ kStatAudioMeWaitUs ] / 1000 );
 	fprintf( fh, "# smooth audio: %u times the sound was skipped for a second because the game fell far behind\n", gStats[ kStatAudioSmoothQuiet ] );
 	fprintf( fh, "# Hottest 256 byte blocks (a function or loop usually lives in one or two):\n" );
 	for( size_t i = 0; i < blocks.size() && i < 30; ++i )

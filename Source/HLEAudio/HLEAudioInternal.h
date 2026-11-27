@@ -427,10 +427,64 @@ void UNKNOWN(AudioHLECommand command);
 // ToDo : remove these and use the ones already provided by the core?
 #define dmem ((u8 *)g_pMemoryBuffers[MEM_SP_MEM] + SP_DMA_DMEM)
 #define imem ((u8 *)g_pMemoryBuffers[MEM_SP_MEM] + SP_DMA_IMEM)
+#ifdef DAEDALUS_PSP
+// PSP: the audio code reaches N64 RAM through gAudioRdram. On the main CPU
+// it is the normal (cached) pointer; while a list runs on the Media Engine
+// it is the uncached alias, so the Media Engine never holds cache lines of
+// N64 RAM and can never write back stale bytes of game data next to the
+// audio buffers (see AudioPluginPSP.cpp, asynchronous mode).
+extern u8 *	gAudioRdram;
+#define rdram gAudioRdram
+// Data the audio code writes gets whole cache lines to itself, for the same
+// reason: the Media Engine writes back every line it changed when a list
+// ends, and nothing the main CPU uses may share those lines.
+#define AUDIO_ME_ALIGN alignas(64)
+#else
 #define rdram ((u8 *)g_pMemoryBuffers[MEM_RD_RAM])
+#define AUDIO_ME_ALIGN
+#endif
 
 // Use these functions to interface with the HLE Audio...
 void Audio_Ucode();
 void Audio_Reset();
+
+// Optional copy of the audio task (OSTask) for Audio_Ucode to read instead
+// of RSP memory, which the main CPU may overwrite with the next task while
+// a list runs on the Media Engine. nullptr: read RSP memory as always.
+extern const void * gAudioTaskOverride;
+
+// N64 RAM ranges the current audio list saved its output to (SaveBuffer
+// and SAVEBUFF2), so the PSP plugin knows that a sound buffer the game hands
+// to the audio hardware came from a list that has finished (see
+// AudioPluginPSP.cpp). Reset at the start of each list.
+struct AUDIO_ME_ALIGN SAudioOutputRanges
+{
+	static const u32 kMax = 32;
+	u32 Count;
+	bool Overflow;
+	u32 Lo[ kMax ];
+	u32 Hi[ kMax ];
+};
+extern SAudioOutputRanges gAudioOutputRanges;
+inline void Audio_NoteOutput( u32 address, u32 length )
+{
+	SAudioOutputRanges & r = gAudioOutputRanges;
+	for( u32 i = 0; i < r.Count; ++i )
+	{
+		if( r.Hi[ i ] == address )			// continues a range (saves of one buffer are often interleaved with others)
+		{
+			r.Hi[ i ] = address + length;
+			return;
+		}
+	}
+	if( r.Count < SAudioOutputRanges::kMax )
+	{
+		r.Lo[ r.Count ] = address;
+		r.Hi[ r.Count ] = address + length;
+		r.Count++;
+	}
+	else
+		r.Overflow = true;
+}
 
 #endif // HLEAUDIO_AUDIOHLE_H_

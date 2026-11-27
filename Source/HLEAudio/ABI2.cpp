@@ -35,8 +35,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "HLEAudio/HLEAudioInternal.h"
 #include "HLEAudio/HLEAudioState.h"
 
-bool isMKABI = false;
-bool isZeldaABI = false;
+// One aligned block (see AUDIO_ME_ALIGN)
+static struct AUDIO_ME_ALIGN SAbiFlags { bool MK = false; bool Zelda = false; } gAbiFlags;
+bool & isMKABI = gAbiFlags.MK;
+bool & isZeldaABI = gAbiFlags.Zelda;
 
 AudioHLEInstruction ABI2[0x20] = {
 // std::array<AudioHLEInstruction, 0x20> ABI2 = {

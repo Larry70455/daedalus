@@ -99,7 +99,8 @@ namespace PerfLog
 		kStatPartialInvalidate,	// a write overlapped compiled code and only the affected fragments were dropped
 		kStatFragmentsDropped,	// fragments dropped that way
 		kStatAudioMeJobs,		// Async audio: audio lists handed to the Media Engine
-		kStatAudioMeBusy,		// Async audio: Media Engine still busy, the list ran on the main CPU
+		kStatAudioMeBusy,		// Async audio: the main CPU had to wait for the Media Engine
+		kStatAudioMeWaitUs,		// Async audio: microseconds spent waiting for it
 		kStatAudioSmoothQuiet,	// Smooth audio: seconds of sound skipped because the game fell far behind
 		kNumStats
 	};

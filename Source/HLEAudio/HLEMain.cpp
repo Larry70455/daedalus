@@ -78,10 +78,18 @@ extern AudioHLEInstruction ABI3[0x20];
 // Below functions were updated
 //
 
-AudioHLEInstruction *ABI = ABIUnknown;
-bool bAudioChanged = false;
-extern bool isMKABI;
-extern bool isZeldaABI;
+// One aligned block (see AUDIO_ME_ALIGN): written by the first list
+static struct AUDIO_ME_ALIGN SAbiSelect { AudioHLEInstruction * Abi = ABIUnknown; bool Changed = false; } gAbiSelect;
+static AudioHLEInstruction *& ABI = gAbiSelect.Abi;
+static bool & bAudioChanged = gAbiSelect.Changed;
+
+const void * gAudioTaskOverride = nullptr;
+SAudioOutputRanges gAudioOutputRanges = {};
+#ifdef DAEDALUS_PSP
+u8 * gAudioRdram = nullptr;
+#endif
+extern bool & isMKABI;
+extern bool & isZeldaABI;
 
 //*****************************************************************************
 //
@@ -95,7 +103,7 @@ void Audio_Reset() {
 //*****************************************************************************
 //
 //*****************************************************************************
-inline void Audio_Ucode_Detect(OSTask *pTask) {
+inline void Audio_Ucode_Detect(const OSTask *pTask) {
   u8 *p_base = g_pu8RamBase + (uintptr_t)pTask->t.ucode_data;
   if (*(u32 *)(p_base + 0) != 0x01) {
     if (*(u32 *)(p_base + 0x10) == 0x00000001)
@@ -117,7 +125,12 @@ void Audio_Ucode() {
 #ifdef DAEDALUS_PROFILE
   DAEDALUS_PROFILE("HLEMain::Audio_Ucode");
 #endif
-  OSTask *pTask = (OSTask *)(g_pu8SpMemBase + 0x0FC0);
+  const OSTask *pTask = gAudioTaskOverride != nullptr ? (const OSTask *)gAudioTaskOverride
+                                                     : (const OSTask *)(g_pu8SpMemBase + 0x0FC0);
+#ifdef DAEDALUS_PSP
+  if (gAudioRdram == nullptr)
+    gAudioRdram = (u8 *)g_pMemoryBuffers[MEM_RD_RAM];
+#endif
 
   // Only detect ABI once per game
   if (!bAudioChanged) {
@@ -125,6 +138,8 @@ void Audio_Ucode() {
     Audio_Ucode_Detect(pTask);
   }
 
+  gAudioOutputRanges.Count = 0;
+  gAudioOutputRanges.Overflow = false;
   gAudioHLEState.LoopVal = 0;
   memset( gAudioHLEState.Segments, 0, sizeof( gAudioHLEState.Segments ) );
 

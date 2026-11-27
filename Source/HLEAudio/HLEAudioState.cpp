@@ -685,6 +685,7 @@ void AudioHLEState::SaveBuffer(u32 ram_dst, u16 dmem_src, u16 count) {
     // XXXX Masks look suspicious - trying to get around endian issues?
     memmove(rdram + (ram_dst & 0xfffffc), Buffer + (dmem_src & 0xFFFC),
             (count + 3) & 0xFFFC);
+    Audio_NoteOutput(ram_dst & 0xfffffc, (count + 3) & 0xFFFC);
   }
 }
 

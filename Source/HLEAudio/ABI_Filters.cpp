@@ -12,17 +12,19 @@
 #include "HLEAudio/HLEAudioInternal.h"
 #include "HLEAudio/HLEAudioState.h"
 
-extern bool isMKABI;
-extern bool isZeldaABI;
+extern bool & isMKABI;
+extern bool & isZeldaABI;
 
 void FILTER2(AudioHLECommand command) {
 #ifdef DEBUG_AUDIO
   DBGConsole_Msg(0, "FILTER2");
 #endif
 
-  static int cnt = 0;
-  static s16 *lutt6;
-  static s16 *lutt5;
+  // One aligned block (see AUDIO_ME_ALIGN)
+  static struct AUDIO_ME_ALIGN SFilter2State { int cnt = 0; s16 *lutt6 = nullptr; s16 *lutt5 = nullptr; } state;
+  int & cnt = state.cnt;
+  s16 *& lutt6 = state.lutt6;
+  s16 *& lutt5 = state.lutt5;
   u8 *save = (rdram + (command.cmd1 & 0xFFFFFF));
   u8 t4 = (u8)((command.cmd0 >> 0x10) & 0xFF);
 

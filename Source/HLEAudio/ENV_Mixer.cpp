@@ -9,11 +9,15 @@
 #include "HLEAudio/HLEAudioInternal.h"
 #include "HLEAudio/HLEAudioState.h"
 
-extern bool isMKABI;
-extern bool isZeldaABI;
+extern bool & isMKABI;
+extern bool & isZeldaABI;
 
-static u32 gEnv_t3 = 0, gEnv_s5 = 0, gEnv_s6 = 0;
-static u16 env[8];
+// One aligned block (see AUDIO_ME_ALIGN)
+static struct AUDIO_ME_ALIGN SEnvState { u32 t3 = 0, s5 = 0, s6 = 0; u16 env[8] = {}; } gEnvState;
+static u32 & gEnv_t3 = gEnvState.t3;
+static u32 & gEnv_s5 = gEnvState.s5;
+static u32 & gEnv_s6 = gEnvState.s6;
+static u16 (&env)[8] = gEnvState.env;
 
 inline u16 Sample_Mask(u32 x) { return (u16)(x & 0xffff); }
 

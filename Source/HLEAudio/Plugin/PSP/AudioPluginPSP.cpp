@@ -27,6 +27,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "Base/Types.h"
 #include <stdio.h>
+#include <cstring>
 #include <new>
 
 #include <pspkernel.h>
@@ -43,6 +44,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "HLEAudio/HLEAudioInternal.h"
 #include "HLEAudio/AudioBuffer.h"
 #include "HLEAudio/AudioPlugin.h"
+#include "Ultra/ultra_sptask.h"
 // #include "SysPSP/Utility/JobManager.h"
 #include "SysPSP/Utility/CacheUtil.h"
 // #include "SysPSP/Utility/JobManager.h"
@@ -89,6 +91,63 @@ bool InitialiseMediaEngine()
 	}
 }
 
+#endif
+
+#ifdef DAEDALUS_PSP_USE_ME
+//
+// Asynchronous audio: each audio list runs on the Media Engine while the
+// main CPU carries on with the game. The Media Engine has its own data
+// cache, and when a job ends it writes back every line it changed; if the
+// main CPU changed other bytes in such a line meanwhile, they would be lost.
+// So:
+// - the audio code reaches N64 RAM only through the uncached alias
+//   (gAudioRdram): the Media Engine holds no cache lines of game memory;
+// - the emulator data the audio code writes has cache lines to itself
+//   (AUDIO_ME_ALIGN);
+// - the task description is copied before the job (RSP memory gets the
+//   next task while the job runs);
+// - one job at a time, and the main CPU reads a finished sound buffer only
+//   after the job that wrote it is done, through a fresh cache view.
+// The main CPU waits only in those two cases; PerfLog counts the waits.
+//
+#ifndef DAEDALUS_ME_AUDIO_SAFE
+#define DAEDALUS_ME_AUDIO_SAFE 1
+#endif
+
+static bool gMEAudioBusy = false;
+static SAudioOutputRanges gLastJobOutput = {};	// outputs of the last finished job (main CPU copy)
+static struct alignas(64) SAudioTaskCopy { OSTask Task; } gAudioTaskCopy;
+
+static int Audio_Ucode_ME( int )
+{
+	Audio_Ucode();
+	return 0;
+}
+
+// Wait for the job on the Media Engine, if any
+static void MEAudio_Wait()
+{
+	if( !gMEAudioBusy )
+		return;
+	if( !CheckME( mei ) )
+	{
+		const u32 start = sceKernelGetSystemTimeLow();
+		WaitME( mei );
+		DAEDALUS_PERF_STAT( kStatAudioMeBusy );	// No-op unless DAEDALUS_PERF_LOG
+#ifdef DAEDALUS_PERF_LOG
+		PerfLog::gStats[ PerfLog::kStatAudioMeWaitUs ] += sceKernelGetSystemTimeLow() - start;
+#else
+		(void)start;
+#endif
+	}
+	// What the job saved (written back by the Media Engine; drop any old
+	// cached copy of these lines first: they hold nothing else)
+	sceKernelDcacheInvalidateRange( &gAudioOutputRanges, sizeof( gAudioOutputRanges ) );
+	gLastJobOutput = gAudioOutputRanges;
+	gMEAudioBusy = false;
+	gAudioTaskOverride = nullptr;
+	gAudioRdram = (u8 *)g_pMemoryBuffers[ MEM_RD_RAM ];
+}
 #endif
 
 #define RSP_AUDIO_INTR_CYCLES     1
@@ -252,6 +311,9 @@ bool		AudioPluginPSP::StartEmulation()
 
 void	AudioPluginPSP::StopEmulation()
 {
+#if defined( DAEDALUS_PSP_USE_ME ) && DAEDALUS_ME_AUDIO_SAFE
+	MEAudio_Wait();
+#endif
     Audio_Reset();
   	StopAudio();
     sceKernelDeleteSema(mSemaphore);
@@ -281,6 +343,39 @@ void	AudioPluginPSP::LenChanged()
 	{
 		u32 address = Memory_AI_GetRegister(AI_DRAM_ADDR_REG) & 0xFFFFFF;
 		u32	length = Memory_AI_GetRegister(AI_LEN_REG);
+#if defined( DAEDALUS_PSP_USE_ME ) && DAEDALUS_ME_AUDIO_SAFE
+		if( gMEAudioBusy || gAudioPluginEnabled == APM_ENABLED_ASYNC )
+		{
+			// The buffer may have been written by the Media Engine (to memory,
+			// past the main CPU's cache): wait for the job, then drop any old
+			// cached copy of the buffer before reading it
+			DAEDALUS_PERF_SCOPE( kAudioHle );	// No-op unless DAEDALUS_PERF_LOG
+			// No need to wait when the buffer is one the previous job saved
+			// (the usual case: the game queues the last finished buffer)
+			bool from_finished_job = false;
+			if( gMEAudioBusy && !gLastJobOutput.Overflow && length != 0 )
+			{
+				// Covered by the ranges that job saved?
+				u32 covered = address;
+				bool progress = true;
+				while( covered < address + length && progress )
+				{
+					progress = false;
+					for( u32 i = 0; i < gLastJobOutput.Count; ++i )
+						if( gLastJobOutput.Lo[ i ] <= covered && covered < gLastJobOutput.Hi[ i ] )
+						{
+							covered = gLastJobOutput.Hi[ i ];
+							progress = true;
+						}
+				}
+				from_finished_job = covered >= address + length;
+			}
+			if( !from_finished_job )
+				MEAudio_Wait();
+			if( length != 0 )
+				sceKernelDcacheWritebackInvalidateRange( g_pu8RamBase + address, length );
+		}
+#endif
 
 		AddBuffer( g_pu8RamBase + address, length );
 	}
@@ -306,6 +401,36 @@ EProcessResult	AudioPluginPSP::ProcessAList()
 		case APM_ENABLED_ASYNC:
 			{
 #ifdef DAEDALUS_PSP_USE_ME
+#if DAEDALUS_ME_AUDIO_SAFE
+				if( gLoadedMediaEnginePRX )
+				{
+					MEAudio_Wait();		// one job at a time
+					memcpy( &gAudioTaskCopy.Task, g_pu8SpMemBase + 0x0FC0, sizeof( OSTask ) );
+					gAudioTaskOverride = &gAudioTaskCopy.Task;
+					gAudioRdram = make_uncached_ptr( (u8 *)g_pMemoryBuffers[ MEM_RD_RAM ] );
+					// Everything the main CPU wrote (samples, the list, the
+					// task copy, gAudioRdram) must be in memory for the
+					// Media Engine; it invalidates its own cache first and
+					// writes back what it changed when done (-1, -1)
+					sceKernelDcacheWritebackInvalidateAll();
+					if( BeginME( mei, (int)&Audio_Ucode_ME, 0, -1, nullptr, -1, nullptr ) >= 0 )
+					{
+						gMEAudioBusy = true;
+						DAEDALUS_PERF_STAT( kStatAudioMeJobs );	// No-op unless DAEDALUS_PERF_LOG
+					}
+					else
+					{
+						gAudioTaskOverride = nullptr;
+						gAudioRdram = (u8 *)g_pMemoryBuffers[ MEM_RD_RAM ];
+						Audio_Ucode();	// cannot happen after MEAudio_Wait
+					}
+					result = PR_COMPLETED;
+					break;
+				}
+				Audio_Ucode();
+				result = PR_COMPLETED;
+				break;
+#endif
 				sceKernelDcacheWritebackInvalidateAll();
 				// BeginME fails when the Media Engine is still busy with the
 				// previous audio job; the job then runs on the main CPU.
@@ -334,10 +459,16 @@ EProcessResult	AudioPluginPSP::ProcessAList()
 			result = PR_COMPLETED;
 			break;
 		case APM_ENABLED_SYNC:
+#if defined( DAEDALUS_PSP_USE_ME ) && DAEDALUS_ME_AUDIO_SAFE
+			MEAudio_Wait();		// e.g. the mode was just changed
+#endif
 			Audio_Ucode();
 			result = PR_COMPLETED;
 			break;
 		case APM_ENABLED_SMOOTH:
+#if defined( DAEDALUS_PSP_USE_ME ) && DAEDALUS_ME_AUDIO_SAFE
+			MEAudio_Wait();
+#endif
 			if( !SmoothIsQuiet( mAudioBufferUncached ) )
 				Audio_Ucode();
 			result = PR_COMPLETED;

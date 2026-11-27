@@ -35,7 +35,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 namespace {
 
-struct CMP3Decode {
+struct AUDIO_ME_ALIGN CMP3Decode {
   u8 mp3data[0x1000];
   s32 v[32];
   u32 inPtr, outPtr;
