@@ -59,7 +59,7 @@ static u32		gLoadAt = 0;	// loadat=N: load the savestate through the in game pat
 static std::string	gSaveStatePath;
 static u32		gSaveAt = 0;			// saveat=N:path: write a savestate at vertical blank N
 static std::string	gSaveAtPath;
-struct SPress { u32 Start; u32 Length; u16 Buttons; };
+struct SPress { u32 Start; u32 Length; u32 Buttons; };	// bits 16-23 / 24-31: analog stick x / y (signed), 0 = centre
 static std::vector< SPress >	gPresses;	// press=VI:BUTTONS:LEN,...
 
 // FNV-1a over 32 bit words. Not cryptographic, only needs to change when the
@@ -151,7 +151,7 @@ bool StateCheck_Start()
 			{
 				unsigned vi = 0, buttons = 0, len = 0;
 				if( sscanf( p, "%u:%x:%u", &vi, &buttons, &len ) == 3 )
-					gPresses.push_back( SPress{ vi, len, (u16)buttons } );
+					gPresses.push_back( SPress{ vi, len, buttons } );
 				const char * comma = strchr( p, ',' );
 				if( comma == nullptr ) break;
 				p = comma + 1;
@@ -247,6 +247,8 @@ void StateCheck_OnVerticalBlank()
 		Finish();
 }
 
+static s8 gStickX = 0, gStickY = 0;	// from press= (see SPress)
+
 bool StateCheck_OverrideInput( u16 * buttons )
 {
 	if( gPresses.empty() )
@@ -263,11 +265,25 @@ bool StateCheck_OverrideInput( u16 * buttons )
 		return false;
 	}
 	u16 b = 0;
+	gStickX = gStickY = 0;
 	for( const SPress & p : gPresses )
 		if( gFrame >= p.Start && gFrame < p.Start + p.Length )
-			b |= p.Buttons;
+		{
+			b |= u16( p.Buttons );
+			if( p.Buttons >> 16 )
+			{
+				gStickX = s8( p.Buttons >> 16 );
+				gStickY = s8( p.Buttons >> 24 );
+			}
+		}
 	*buttons = b;
 	return true;
+}
+
+void StateCheck_GetStick( s8 * x, s8 * y )
+{
+	*x = gStickX;
+	*y = gStickY;
 }
 
 void StateCheck_OnException()

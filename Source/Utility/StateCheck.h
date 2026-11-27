@@ -70,6 +70,7 @@ void	StateCheck_OnException();	// exclog=1: one line per exception taken
 // Scripted input (press= in statecheck.txt): returns true and sets *buttons
 // when a script is active (the real pad is then ignored).
 bool	StateCheck_OverrideInput( u16 * buttons );
+void	StateCheck_GetStick( s8 * x, s8 * y );	// analog stick from press= (bits 16-31 of BUTTONS)
 
 #define DAEDALUS_STATE_CHECK_VBL()	StateCheck_OnVerticalBlank()
 #define DAEDALUS_STATE_CHECK_EXCEPTION()	StateCheck_OnException()

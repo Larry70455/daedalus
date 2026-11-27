@@ -446,8 +446,10 @@ void IInputManager::GetState( OSContPad pPad[4] )
 		if( StateCheck_OverrideInput( &scripted ) )	// press= in statecheck.txt (test harness)
 		{
 			pPad[0].button = scripted;
-			pPad[0].stick_x = 0;
-			pPad[0].stick_y = 0;
+			s8 sx, sy;
+			StateCheck_GetStick( &sx, &sy );
+			pPad[0].stick_x = sx;
+			pPad[0].stick_y = sy;
 		}
 	}
 #endif
