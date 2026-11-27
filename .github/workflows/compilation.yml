@@ -3,6 +3,8 @@ name: PSP slide disassembly
 on:
   push:
     branches: [codex/psp-slide-disassembly]
+  pull_request:
+    branches: [master]
   workflow_dispatch:
 
 permissions:
