@@ -389,6 +389,75 @@ static bool GetWrittenRegister( u32 w, u32 * p_reg )
 		return false;
 	}
 }
+
+// Second try (DAEDALUS_FILL_BRANCH_DELAY_2): often the instruction just
+// before the branch computes what the branch tests (the event countdown
+// "addiu s5,s5,-n; blez s5", or a constant for a compare), so it cannot
+// move. The one before it can then go into the delay slot instead, moving
+// past both: allowed only when neither touches a register the other uses,
+// at most one of them reads or writes memory, and it does not write a
+// register the branch reads. Register numbers 32 (hi/lo) and 33 (all float
+// registers) stand for the extra state the decoded instructions use.
+#ifndef DAEDALUS_FILL_BRANCH_DELAY_2
+#define DAEDALUS_FILL_BRANCH_DELAY_2 1
+#endif
+
+static const u32 kRegHiLo = 32;
+static const u32 kRegFloat = 33;
+
+// Registers an instruction reads and writes (bit masks over 0..33) and
+// whether it accesses memory. False for anything not decoded here.
+static bool GetRegisterUse( u32 w, u64 * p_reads, u64 * p_writes, bool * p_memory )
+{
+	const u32 op = w >> 26;
+	const u64 rs = 1ull << ( ( w >> 21 ) & 0x1f );
+	const u64 rt = 1ull << ( ( w >> 16 ) & 0x1f );
+	const u64 rd = 1ull << ( ( w >> 11 ) & 0x1f );
+	const u64 hilo = 1ull << kRegHiLo;
+	const u64 fpr = 1ull << kRegFloat;
+	*p_memory = false;
+	switch( op )
+	{
+	case OP_SPECOP:
+		switch( w & 0x3f )
+		{
+		case SpecOp_SLL: case SpecOp_SRL: case SpecOp_SRA:
+			*p_reads = rt; *p_writes = rd; break;
+		case SpecOp_SLLV: case SpecOp_SRLV: case SpecOp_SRAV:
+		case SpecOp_ADD: case SpecOp_ADDU: case SpecOp_SUB: case SpecOp_SUBU:
+		case SpecOp_AND: case SpecOp_OR: case SpecOp_XOR: case SpecOp_NOR:
+		case SpecOp_SLT: case SpecOp_SLTU:
+			*p_reads = rs | rt; *p_writes = rd; break;
+		case SpecOp_MFHI: case SpecOp_MFLO:
+			*p_reads = hilo; *p_writes = rd; break;
+		case SpecOp_MTHI: case SpecOp_MTLO:
+			*p_reads = rs; *p_writes = hilo; break;
+		case SpecOp_MULT: case SpecOp_MULTU: case SpecOp_DIV: case SpecOp_DIVU:
+			*p_reads = rs | rt; *p_writes = hilo; break;
+		default:
+			return false;
+		}
+		break;
+	case OP_ADDI: case OP_ADDIU: case OP_SLTI: case OP_SLTIU:
+	case OP_ANDI: case OP_ORI: case OP_XORI:
+		*p_reads = rs; *p_writes = rt; break;
+	case OP_LUI:
+		*p_reads = 0; *p_writes = rt; break;
+	case OP_LB: case OP_LH: case OP_LW: case OP_LBU: case OP_LHU:
+		*p_reads = rs; *p_writes = rt; *p_memory = true; break;
+	case OP_SB: case OP_SH: case OP_SW:
+		*p_reads = rs | rt; *p_writes = 0; *p_memory = true; break;
+	case OP_LWC1:
+		*p_reads = rs; *p_writes = fpr; *p_memory = true; break;
+	case OP_SWC1:
+		*p_reads = rs | fpr; *p_writes = 0; *p_memory = true; break;
+	default:
+		return false;
+	}
+	*p_reads &= ~1ull;		// r0 is constant
+	*p_writes &= ~1ull;
+	return true;
+}
 #endif
 
 // When the previous instruction in the current buffer can go into the delay
@@ -408,10 +477,36 @@ bool	CAssemblyWriterPSP::TakeDelaySlotOp( EPspReg a, EPspReg b, PspOpCode * p_op
 	if( IsControlTransfer( prev ) ) return false;
 	u32 written;
 	if( !GetWrittenRegister( prev, &written ) ) return false;
-	if( written != 0 && ( written == u32( a ) || written == u32( b ) ) ) return false;
-	mpCurrentBuffer->Truncate( prev_pos );
-	p_op->_u32 = prev;
+	if( written == 0 || ( written != u32( a ) && written != u32( b ) ) )
+	{
+		mpCurrentBuffer->Truncate( prev_pos );
+		p_op->_u32 = prev;
+		return true;
+	}
+#if DAEDALUS_FILL_BRANCH_DELAY_2
+	// prev computes what the branch tests: try the instruction before it
+	if( pos < 12 ) return false;
+	const u32 prev2_pos = pos - 8;
+	if( mpCurrentBuffer->GetLastMarkPos() >= prev2_pos ) return false;
+	const u32 prev2 = mpCurrentBuffer->GetWordAt( prev2_pos );
+	if( prev2 == 0 || IsControlTransfer( prev2 ) ) return false;
+	if( IsControlTransfer( mpCurrentBuffer->GetWordAt( prev2_pos - 4 ) ) ) return false;	// it is a delay slot
+	u64 r1, w1, r2, w2;
+	bool m1, m2;
+	if( !GetRegisterUse( prev, &r1, &w1, &m1 ) || !GetRegisterUse( prev2, &r2, &w2, &m2 ) ) return false;
+	if( m1 && m2 ) return false;					// keep the order of memory accesses
+	if( ( w2 & ( r1 | w1 ) ) || ( r2 & w1 ) ) return false;	// they must not depend on each other
+	const u64 branch_reads = ( ( 1ull << u32( a ) ) | ( 1ull << u32( b ) ) ) & ~1ull;
+	if( w2 & branch_reads ) return false;
+	mpCurrentBuffer->Truncate( prev2_pos );
+	PspOpCode moved {};
+	moved._u32 = prev;
+	AppendOp( moved );
+	p_op->_u32 = prev2;
 	return true;
+#else
+	return false;
+#endif
 #else
 	return false;
 #endif
