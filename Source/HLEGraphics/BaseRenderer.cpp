@@ -332,6 +332,13 @@ void BaseRenderer::Reset()
 //*****************************************************************************
 void BaseRenderer::BeginScene()
 {
+#if defined(DAEDALUS_PSP) && DAEDALUS_GFX_STREAM
+	if( mRecording )
+	{
+		InitViewport();		// state only: the back end does the rest
+		return;
+	}
+#endif
 #ifdef DAEDALUS_PSP
 	GuCacheInvalidate();	// GE state cache: trust nothing set outside this display list
 	gGuCacheActive = true;
@@ -352,11 +359,16 @@ void BaseRenderer::BeginScene()
 //*****************************************************************************
 void BaseRenderer::EndScene()
 {
+#if defined(DAEDALUS_PSP) && DAEDALUS_GFX_STREAM
+	if( !mRecording )
+#endif
+	{
 #ifdef DAEDALUS_PSP
 	GuCacheInvalidate();	// GE state cache: trust nothing set outside this display list
 	gGuCacheActive = false;
 #endif
 	CGraphicsContext::Get()->EndFrame();
+	}
 
 	//
 	//	Clear this, to ensure we're force to check for updates to it on the next frame
@@ -469,6 +481,10 @@ void BaseRenderer::UpdateViewport()
 	//DBGConsole_Msg(0, "[WViewport Changed (%d) (%d)]",vp_w,vp_h );
 
 #if defined(DAEDALUS_PSP)
+#if DAEDALUS_GFX_STREAM
+	if( mRecording )
+		return;		// the back end sets it from the recorded state
+#endif
 	const u32 vx = 2048;
 	const u32 vy = 2048;
 
@@ -1441,7 +1457,7 @@ void BaseRenderer::SetNewVertexInfoDKR(u32 address, u32 v0, u32 n, bool billboar
 		{	
 			//Only reload matrix if it has been changed and no billbording //Corn
 			mWPmodified = false;
-			sceGuSetMatrix( GU_PROJECTION, reinterpret_cast< const ScePspFMatrix4 * >( &mat_world_project) );
+			SetGuProjection( mat_world_project );
 		}
 #ifdef DAEDALUS_PSP_USE_VFPU
 		_TnLVFPUDKR( n, &mat_world_project, (const FiddledVtx*)pVtxBase, &mVtxProjected[v0] );
@@ -1776,9 +1792,24 @@ void BaseRenderer::UpdateTileSnapshot( u32 index, u32 tile_idx )
 	// It might just be code that lazily does a texrect with Primcolour (i.e. not using either T0 or T1)?
 	// DAEDALUS_ASSERT( gRDPStateManager.IsTileInitialised( tile_idx ), "Tile %d hasn't been set up (index %d)", tile_idx, index );
 
+#if defined(DAEDALUS_PSP) && DAEDALUS_GFX_STREAM
+	const TextureInfo * p_ti;
+	const RDP_Tile * p_tile;
+	const RDP_TileSize * p_size;
+	if( !GetTileState( tile_idx, &p_ti, &p_tile, &p_size ) )
+	{
+		p_ti   = &gRDPStateManager.GetUpdatedTextureDescriptor( tile_idx );
+		p_tile = &gRDPStateManager.GetTile( tile_idx );
+		p_size = &gRDPStateManager.GetTileSize( tile_idx );
+	}
+	const TextureInfo &  ti        = *p_ti;
+	const RDP_Tile &     rdp_tile  = *p_tile;
+	const RDP_TileSize & tile_size = *p_size;
+#else
 	const TextureInfo &  ti        = gRDPStateManager.GetUpdatedTextureDescriptor( tile_idx );
 	const RDP_Tile &     rdp_tile  = gRDPStateManager.GetTile( tile_idx );
 	const RDP_TileSize & tile_size = gRDPStateManager.GetTileSize( tile_idx );
+#endif
 
 	// Avoid texture update, if texture is the same as last time around.
 	if( mBoundTexture[ index ] == NULL || mBoundTextureInfo[ index ] != ti )
@@ -1932,7 +1963,16 @@ inline void FixUV(u32 * wrap, s16 * c0_, s16 * c1_, s16 offset, u32 size)
 // puv0, puv1 are in/out arguments.
 void BaseRenderer::PrepareTexRectUVs(TexCoord * puv0, TexCoord * puv1)
 {
+#if defined(DAEDALUS_PSP) && DAEDALUS_GFX_STREAM
+	const TextureInfo * p_ti;
+	const RDP_Tile * p_tile;
+	const RDP_TileSize * p_size;
+	if( !GetTileState( mActiveTile[0], &p_ti, &p_tile, &p_size ) )
+		p_tile = &gRDPStateManager.GetTile( mActiveTile[0] );
+	const RDP_Tile & rdp_tile = *p_tile;
+#else
 	const RDP_Tile & rdp_tile = gRDPStateManager.GetTile( mActiveTile[0] );
+#endif
 
 	TexCoord	offset = mTileTopLeft[0];
 	u32 		size_x = mBoundTextureInfo[0].GetWidth()  << 5;
@@ -1960,6 +2000,39 @@ void BaseRenderer::PrepareTexRectUVs(TexCoord * puv0, TexCoord * puv1)
 //*****************************************************************************
 //
 //*****************************************************************************
+void BaseRenderer::SetGuProjection( const glm::mat4 & mat )
+{
+#if defined(DAEDALUS_PSP) && DAEDALUS_GFX_STREAM
+	if( mRecording )
+	{
+		RecordProjection( mat );
+		return;
+	}
+#endif
+	sceGuSetMatrix( GU_PROJECTION, reinterpret_cast< const ScePspFMatrix4 * >( &mat ) );
+}
+
+#if defined(DAEDALUS_PSP) && DAEDALUS_GFX_STREAM
+// Back end while replaying: the tile as recorded with the command
+bool BaseRenderer::GetTileState( u32 tile_idx, const TextureInfo ** p_ti, const RDP_Tile ** p_tile, const RDP_TileSize ** p_size )
+{
+	if( mReplayState == nullptr )
+		return false;
+	for( u32 i = 0; i < mReplayState->NumTiles; ++i )
+	{
+		const SReplayTile & t = mReplayState->Tiles[ i ];
+		if( t.Idx == tile_idx )
+		{
+			*p_ti = &t.Ti;
+			*p_tile = &t.Tile;
+			*p_size = &t.Size;
+			return true;
+		}
+	}
+	return false;
+}
+#endif
+
 std::shared_ptr<CNativeTexture> BaseRenderer::LoadTextureDirectly( const TextureInfo & ti )
 {
 	std::shared_ptr<CNativeTexture> texture = CTextureCache::Get()->GetOrCreateTexture( ti );
@@ -1983,6 +2056,10 @@ std::shared_ptr<CNativeTexture> BaseRenderer::LoadTextureDirectly( const Texture
 void BaseRenderer::SetScissor( u32 x0, u32 y0, u32 x1, u32 y1 )
 {
 	mScissor[ 0 ] = x0; mScissor[ 1 ] = y0; mScissor[ 2 ] = x1; mScissor[ 3 ] = y1;
+#if defined(DAEDALUS_PSP) && DAEDALUS_GFX_STREAM
+	if( mRecording )
+		return;		// the back end sets it from the recorded state
+#endif
 
 	//Clamp scissor to max N64 screen resolution //Corn
 	x1 = std::min(x1, uViWidth);
@@ -2053,7 +2130,7 @@ void BaseRenderer::SetProjection(const u32 address, bool bReplace)
 	}
 
 	mWorldProjectValid = false;
-	sceGuSetMatrix( GU_PROJECTION, reinterpret_cast< const ScePspFMatrix4 * >( &mProjectionMat) );
+	SetGuProjection( mProjectionMat );
 
 #ifdef DAEDALUS_ENABLE_PROFILING
 	DL_PF(
@@ -2168,7 +2245,7 @@ inline void BaseRenderer::UpdateWorldProject()
 		{
 			FlushPendingDraw();	// held back triangles use the current matrix
 			mReloadProj = false;
-			sceGuSetMatrix( GU_PROJECTION, reinterpret_cast< const ScePspFMatrix4 * >( &mProjectionMat) );
+			SetGuProjection( mProjectionMat );
 		}
 		MatMul( mWorldProject, mProjectionMat, mModelViewStack[mModelViewTop] );
 	}
@@ -2189,7 +2266,7 @@ inline void BaseRenderer::UpdateWorldProject()
 			mWorldProject[3][0] *= HD_SCALE;  // Column 0, Row 3
 		}
 		FlushPendingDraw();	// held back triangles use the current matrix
-		sceGuSetMatrix( GU_PROJECTION, reinterpret_cast< const ScePspFMatrix4 * >( &mWorldProject ) );
+		SetGuProjection( mWorldProject );
 		mModelViewStack[mModelViewTop] = glm::mat4(1.0f);;
 	}
 }

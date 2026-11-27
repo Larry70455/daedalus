@@ -31,7 +31,7 @@ struct DebugBlendSettings
 class RendererPSP : public BaseRenderer
 {
 public:
-	RendererPSP();
+	explicit RendererPSP( bool render_targets = true );
 	~RendererPSP();
 
 	virtual void		RestoreRenderStates();
@@ -63,6 +63,22 @@ public:
 	virtual void		SetColorImage( u32 address, u32 width, u32 format, u32 size );
 	virtual void		EndRenderTarget();
 	virtual std::shared_ptr<CNativeTexture>	LookupRenderTarget( const TextureInfo & ti );
+
+#if DAEDALUS_GFX_STREAM
+	// Record and replay (see SGfxState in BaseRenderer.h)
+	virtual std::shared_ptr<CNativeTexture> LoadTextureDirectly( const TextureInfo & ti );
+	void				ReplayCommands( const u8 * p_begin, const u8 * p_end );	// back end
+	void				ClearZBuffer();											// recorded when recording
+	void				ClearColBuffer( c32 colour );							// recorded when recording
+	void				BeginReplayFrame();										// back end
+	void				EndReplayFrame();										// back end
+protected:
+	virtual void		RecordProjection( const glm::mat4 & mat );
+private:
+	void				RecordState( u32 tile_idx );
+	void				ApplyState( const SGfxState & state );
+public:
+#endif
 
 private:
 	// For handling large textures.
@@ -145,5 +161,13 @@ private:
 
 // NB: this is equivalent to gRenderer, but points to the implementation class, for platform-specific functionality.
 extern RendererPSP * gRendererPSP;
+
+#if DAEDALUS_GFX_STREAM
+// The back end renderer that replays recorded display lists (null when off)
+extern RendererPSP * gRendererBack;
+// Display list recording: true while the front end records (DLParser_Process)
+bool GfxStream_Begin();
+void GfxStream_End();
+#endif
 
 #endif // SYSPSP_HLEGRAPHICS_RENDERERPSP_H_

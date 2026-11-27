@@ -32,6 +32,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "HLEGraphics/ConvertFormats.h"			// YUVtoRGBA
 #include "HLEGraphics/DLDebug.h"
 #include "HLEGraphics/DLParser.h"
+#if defined(DAEDALUS_PSP)
+#include "SysPSP/HLEGraphics/RendererPSP.h"
+#endif
 #include "HLEGraphics/BaseRenderer.h"
 #include "HLEGraphics/Microcode.h"
 #include "HLEGraphics/N64PixelFormat.h"
@@ -592,11 +595,19 @@ u32 DLParser_Process(u32 instruction_limit, DLDebugOutput * debug_output)
 		gRenderer->SetVIScales();
 		gRenderer->ResetMatrices(stack_size);
 		gRenderer->Reset();
+#if DAEDALUS_GFX_STREAM
+		// Record the display list, then draw it with the back end renderer
+		const bool recording = GfxStream_Begin();
+#endif
 		gRenderer->BeginScene();
 		count = DLParser_ProcessDList(instruction_limit);
 		gRenderer->FlushPendingDraw();
 		gRenderer->EndRenderTarget();
 		gRenderer->EndScene();
+#if DAEDALUS_GFX_STREAM
+		if( recording )
+			GfxStream_End();
+#endif
 	}
 	else
 	{
@@ -1103,7 +1114,11 @@ void DLParser_FillRect( MicroCodeCommand command )
 	//Always clear Zbuffer if Depthbuffer is selected //Corn
 	if (g_DI.Address == g_CI.Address)
 	{
+#if DAEDALUS_GFX_STREAM
+		gRendererPSP->ClearZBuffer();	// in order with the drawing (recorded)
+#else
 		CGraphicsContext::Get()->ClearZBuffer();
+#endif
 
 #ifdef DAEDALUS_PSP
 		if(gClearDepthFrameBuffer)
@@ -1159,7 +1174,11 @@ void DLParser_FillRect( MicroCodeCommand command )
 			// Clear the screen if its just a large rectangle
 			if( (x1 - x0) == uViWidth && (y1 - y0) == uViHeight )
 			{
+#if DAEDALUS_GFX_STREAM
+				gRendererPSP->ClearColBuffer( colour );	// in order with the drawing (recorded)
+#else
 				CGraphicsContext::Get()->ClearColBuffer( colour );
+#endif
 				DL_PF("    Clearing Colour Buffer");
 				return;
 			}

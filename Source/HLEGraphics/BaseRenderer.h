@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "HLEGraphics/TextureInfo.h"
 #include "Graphics/ColourValue.h"
 #include "Interface/Preferences.h"
+#include "HLEGraphics/RDP.h"
 #include <array>
 
 #ifdef DAEDALUS_PSP
@@ -239,6 +240,57 @@ static const u32 kMaxN64Vertices = 80;		// F3DLP.Rej supports up to 80 verts!
 #define DAEDALUS_MERGE_DRAWS 0
 #endif
 //*****************************************************************************
+// Display list record and replay (DAEDALUS_GFX_STREAM, PSP only)
+//
+// First step towards processing display lists on the Media Engine: the
+// renderer is split in two objects. The front end (gRenderer) parses the
+// display list, transforms vertices and builds triangles as before, but
+// instead of talking to the PSP graphics chip it records each drawing
+// command, with a copy of the state that command needs (SGfxState), in a
+// command buffer. At the end of the display list the back end (a second
+// RendererPSP) replays the buffer: texture lookup, blend modes and GE
+// commands. Results must be identical to drawing directly.
+//*****************************************************************************
+#if defined(DAEDALUS_PSP) && !defined(DAEDALUS_GFX_STREAM)
+#define DAEDALUS_GFX_STREAM 0
+#endif
+
+#if defined(DAEDALUS_PSP) && DAEDALUS_GFX_STREAM
+// A texture tile as the RDP state described it when a command was recorded
+struct SReplayTile
+{
+	u32				Idx;
+	TextureInfo		Ti;
+	RDP_Tile		Tile;
+	RDP_TileSize	Size;
+};
+
+// Everything the back end reads from the front end's state
+struct SGfxState
+{
+	u64				OtherMode;
+	u64				Mux;
+	u32				TnLFlags;
+	u32				TextureTile;
+	f32				PrimDepth;
+	f32				PrimLODFraction;
+	f32				FogNear;
+	f32				FogFar;
+	u32				FogColour;
+	u32				PrimitiveColour;
+	u32				EnvColour;
+	u32				BlendColour;
+	u32				FillColour;
+	f32				VpScale[ 2 ];
+	f32				VpTrans[ 2 ];
+	u32				Scissor[ 4 ];
+	u32				Draw2DCombiner;
+	u32				NumTiles;
+	SReplayTile		Tiles[ 2 ];
+};
+#endif
+
+//*****************************************************************************
 //
 //*****************************************************************************
 class BaseRenderer
@@ -408,9 +460,27 @@ public:
 	inline float		N64ToScreenY(float y) const				{ return y * mN64ToScreenScale.y + mN64ToScreenTranslate.y; }
 #endif
 
+#if defined(DAEDALUS_PSP) && DAEDALUS_GFX_STREAM
+	virtual std::shared_ptr<CNativeTexture> LoadTextureDirectly( const TextureInfo & ti );
+	// Front end: record commands instead of drawing (see SGfxState)
+	inline void			SetRecording( bool recording )			{ mRecording = recording; }
+	inline bool			IsRecording() const						{ return mRecording; }
+#else
 	std::shared_ptr<CNativeTexture> LoadTextureDirectly( const TextureInfo & ti );
+#endif
 
 protected:
+#if defined(DAEDALUS_PSP) && DAEDALUS_GFX_STREAM
+	bool				mRecording = false;
+	// Back end, while replaying: texture tiles recorded with the command
+	// (used instead of gRDPStateManager, which belongs to the front end)
+	const SGfxState *	mReplayState = nullptr;		// null, or &mReplayStateCopy
+	SGfxState			mReplayStateCopy;			// kept for the whole frame: the command buffer may be reused mid frame
+	bool				GetTileState( u32 tile_idx, const TextureInfo ** p_ti, const RDP_Tile ** p_tile, const RDP_TileSize ** p_size );
+	// Front end: the projection matrix is GE state, recorded in order
+	virtual void		RecordProjection( const glm::mat4 & mat [[maybe_unused]] ) {}
+#endif
+	void				SetGuProjection( const glm::mat4 & mat );
 #ifdef DAEDALUS_PSP
 	inline void			UpdateFogEnable()						{ if(gFogEnabled) mTnL.Flags.Fog ? sceGuEnable(GU_FOG) : sceGuDisable(GU_FOG); }
 	inline void			UpdateShadeModel()						{ sceGuShadeModel( mTnL.Flags.Shade ? GU_SMOOTH : GU_FLAT ); }

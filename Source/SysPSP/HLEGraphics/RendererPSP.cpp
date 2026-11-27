@@ -49,6 +49,92 @@ extern void InitBlenderMode( u32 blender );
 #define DAEDALUS_S2DEX_COMBINER 1
 #endif
 bool gDraw2DCombiner = false;	// set by S2DEX_DRAW_SCOPE (Ucode_S2DEX.h)
+bool gGfxStreamOff = false;
+u32 gGfxStreamLimit = 256 * 1024;	// command buffer limit (test harness: StateCheck gfxsmall=N to exercise the full buffer path)
+
+#if DAEDALUS_GFX_STREAM
+// Command buffer of the display list record and replay (see RendererPSP::ReplayCommands)
+namespace
+{
+	enum EGfxOp : u16
+	{
+		GOP_STATE = 1,
+		GOP_TRIS,
+		GOP_TEXRECT,
+		GOP_TEXRECT_FLIP,
+		GOP_FILLRECT,
+		GOP_DRAW2D,
+		GOP_DRAW2D_R,
+		GOP_LOADTEX,
+		GOP_COLORIMAGE,
+		GOP_END_RENDER_TARGET,
+		GOP_PROJECTION,
+		GOP_CLEAR_Z,
+		GOP_CLEAR_COLOUR,
+	};
+
+	struct SGfxOpHeader		{ u16 Op; u16 Bytes; };		// Bytes: data after the header
+	struct SOpTris			{ DaedalusVtx * Verts; u32 Count; u32 DisableZ; };
+	struct SOpTexRect		{ u32 Tile; f32 X0, Y0, X1, Y1; TexCoord St0, St1; };
+	struct SOpFillRect		{ f32 X0, Y0, X1, Y1; u32 Colour; };
+	struct SOpDraw2D		{ f32 V[ 10 ]; u32 Texture; };
+	struct SOpLoadTex		{ TextureInfo Ti; u32 Texture; };
+	struct SOpColorImage	{ u32 Address, Width, Format, Size; };
+	struct SOpProjection	{ glm::mat4 Mat; };
+
+	const u32				kStreamBytes = 256 * 1024;
+	alignas(64) u8			gStream[ kStreamBytes ];
+	u32						gStreamPos = 0;
+	bool					gStreamActive = false;
+	SGfxState				gLastState;
+	bool					gLastStateValid = false;
+
+	// Textures loaded with LoadTextureDirectly: the front end hands out a
+	// placeholder holding a number, the back end keeps the real ones
+	const u32				kNumReplayTextures = 64;
+	u32						gNextTextureId = 0;
+	std::shared_ptr<CNativeTexture>	gReplayTextures[ kNumReplayTextures ];
+
+	inline std::shared_ptr<CNativeTexture> MakeTextureToken( u32 id )
+	{
+		// Aliasing constructor without an owner: no allocation, never freed
+		return std::shared_ptr<CNativeTexture>( std::shared_ptr<CNativeTexture>(), reinterpret_cast<CNativeTexture *>( uintptr_t( id ) + 1 ) );
+	}
+	inline u32 TextureTokenId( const std::shared_ptr<CNativeTexture> & token )
+	{
+		return u32( reinterpret_cast<uintptr_t>( token.get() ) - 1 );
+	}
+
+	void ReplayAll()
+	{
+		// The back end sets these shared globals from the recorded state;
+		// the front end may still be in the middle of the display list
+		const u64 other_mode = gRDPOtherMode._u64;
+		const bool draw_2d_combiner = gDraw2DCombiner;
+		if( gStreamPos != 0 )
+			gRendererBack->ReplayCommands( gStream, gStream + gStreamPos );
+		gRDPOtherMode._u64 = other_mode;
+		gDraw2DCombiner = draw_2d_combiner;
+		gStreamPos = 0;
+		gLastStateValid = false;	// the next command starts a new buffer
+	}
+
+	// Room for a command with 'bytes' of data: replays what is buffered when full
+	void * StreamAlloc( EGfxOp op, u32 bytes )
+	{
+		bytes = ( bytes + 3 ) & ~3u;
+		const u32 limit = gGfxStreamLimit < kStreamBytes ? gGfxStreamLimit : kStreamBytes;
+		if( gStreamPos + sizeof( SGfxOpHeader ) + bytes > limit )
+			ReplayAll();
+		SGfxOpHeader * h = reinterpret_cast<SGfxOpHeader *>( &gStream[ gStreamPos ] );
+		h->Op = op;
+		h->Bytes = u16( bytes );
+		void * data = h + 1;
+		gStreamPos += sizeof( SGfxOpHeader ) + bytes;
+		return data;
+	}
+}
+#endif
 
 // 1: polygons whose N64 blend result is the framebuffer unchanged only write
 // depth (fixes black polygons in Pokemon Stadium 2's Strength). 0: old code.
@@ -169,9 +255,10 @@ u32 alignas(DATA_ALIGN) gSelectedTexture[kPlaceholderSize];
 
 #endif // DAEDALUS_DEBUG_DISPLAYLIST
 
-RendererPSP::RendererPSP()
+RendererPSP::RendererPSP( bool render_targets )
 {
-	CreateRenderTargets();
+	if( render_targets )
+		CreateRenderTargets();
 
 	//
 	//	Set up RGB = T0, A = T0
@@ -375,6 +462,17 @@ bool RendererPSP::CanMergeDraws()
 
 void RendererPSP::RenderTriangles( DaedalusVtx * p_vertices, u32 num_vertices, bool disable_zbuffer )
 {
+#if DAEDALUS_GFX_STREAM
+	if( mRecording )
+	{
+		RecordState( mTnL.Flags.Texture ? mTextureTile : ~0u );
+		SOpTris * op = static_cast<SOpTris *>( StreamAlloc( GOP_TRIS, sizeof( SOpTris ) ) );
+		op->Verts = p_vertices;
+		op->Count = num_vertices;
+		op->DisableZ = disable_zbuffer ? 1 : 0;
+		return;
+	}
+#endif
 	if( mTnL.Flags.Texture )
 	{
 		UpdateTileSnapshots( mTextureTile );
@@ -813,6 +911,19 @@ void RendererPSP::DrawPendingRects( u32 count )
 
 void RendererPSP::TexRect( u32 tile_idx, const glm::vec2 & xy0, const glm::vec2 & xy1, TexCoord st0, TexCoord st1 )
 {
+#if DAEDALUS_GFX_STREAM
+	if( mRecording )
+	{
+		FlushPendingDraw();		// held back triangles come first, as when drawing directly
+		RecordState( tile_idx );
+		SOpTexRect * op = static_cast<SOpTexRect *>( StreamAlloc( GOP_TEXRECT, sizeof( SOpTexRect ) ) );
+		op->Tile = tile_idx;
+		op->X0 = xy0.x; op->Y0 = xy0.y; op->X1 = xy1.x; op->Y1 = xy1.y;
+		op->St0 = st0; op->St1 = st1;
+		mTnL.Flags.Fog = 0;		// as drawing does (see below), later commands see it
+		return;
+	}
+#endif
 	mTnL.Flags.Fog = 0;	//For now we force fog off for textrect, normally it should be fogged when depth_source is set //Corn
 
 #if DAEDALUS_MERGE_DRAWS
@@ -956,6 +1067,19 @@ void RendererPSP::TexRect( u32 tile_idx, const glm::vec2 & xy0, const glm::vec2 
 
 void RendererPSP::TexRectFlip( u32 tile_idx, const glm::vec2 & xy0, const glm::vec2 & xy1, TexCoord st0, TexCoord st1 )
 {
+#if DAEDALUS_GFX_STREAM
+	if( mRecording )
+	{
+		FlushPendingDraw();		// held back triangles come first, as when drawing directly
+		RecordState( tile_idx );
+		SOpTexRect * op = static_cast<SOpTexRect *>( StreamAlloc( GOP_TEXRECT_FLIP, sizeof( SOpTexRect ) ) );
+		op->Tile = tile_idx;
+		op->X0 = xy0.x; op->Y0 = xy0.y; op->X1 = xy1.x; op->Y1 = xy1.y;
+		op->St0 = st0; op->St1 = st1;
+		mTnL.Flags.Fog = 0;		// as drawing does (see below), later commands see it
+		return;
+	}
+#endif
 	mTnL.Flags.Fog = 0;	//For now we force fog off for textrect, normally it should be fogged when depth_source is set //Corn
 
 	UpdateTileSnapshots( tile_idx );
@@ -1028,6 +1152,17 @@ void RendererPSP::TexRectFlip( u32 tile_idx, const glm::vec2 & xy0, const glm::v
 
 void RendererPSP::FillRect( const glm::vec2 & xy0, const glm::vec2 & xy1, u32 color )
 {
+#if DAEDALUS_GFX_STREAM
+	if( mRecording )
+	{
+		FlushPendingDraw();
+		RecordState( ~0u );
+		SOpFillRect * op = static_cast<SOpFillRect *>( StreamAlloc( GOP_FILLRECT, sizeof( SOpFillRect ) ) );
+		op->X0 = xy0.x; op->Y0 = xy0.y; op->X1 = xy1.x; op->Y1 = xy1.y;
+		op->Colour = color;
+		return;
+	}
+#endif
 /*
 	if ( (gRDPOtherMode._u64 & 0xffff0000) == 0x5f500000 )	//Used by Wave Racer
 	{
@@ -1123,6 +1258,18 @@ void RendererPSP::Draw2DWithCombiner( const glm::vec2 * xy, const glm::vec2 * uv
 void RendererPSP::Draw2DTexture(f32 x0, f32 y0, f32 x1, f32 y1,
 								f32 u0, f32 v0, f32 u1, f32 v1, std::shared_ptr<CNativeTexture> texture)
 {
+#if DAEDALUS_GFX_STREAM
+	if( mRecording )
+	{
+		FlushPendingDraw();
+		RecordState( ~0u );
+		SOpDraw2D * op = static_cast<SOpDraw2D *>( StreamAlloc( GOP_DRAW2D, sizeof( SOpDraw2D ) ) );
+		const f32 v[ 8 ] = { x0, y0, x1, y1, u0, v0, u1, v1 };
+		memcpy( op->V, v, sizeof( v ) );
+		op->Texture = TextureTokenId( texture );
+		return;
+	}
+#endif
 #if DAEDALUS_S2DEX_COMBINER
 	if( gDraw2DCombiner && u1 < 512.f && v1 < 512.f )
 	{
@@ -1201,6 +1348,18 @@ void RendererPSP::Draw2DTextureR(f32 x0, f32 y0, f32 x1, f32 y1,
 								 f32 x2, f32 y2, f32 x3, f32 y3,
 								 f32 s, f32 t, std::shared_ptr<CNativeTexture> texture)	// With Rotation
 {
+#if DAEDALUS_GFX_STREAM
+	if( mRecording )
+	{
+		FlushPendingDraw();
+		RecordState( ~0u );
+		SOpDraw2D * op = static_cast<SOpDraw2D *>( StreamAlloc( GOP_DRAW2D_R, sizeof( SOpDraw2D ) ) );
+		const f32 v[ 10 ] = { x0, y0, x1, y1, x2, y2, x3, y3, s, t };
+		memcpy( op->V, v, sizeof( v ) );
+		op->Texture = TextureTokenId( texture );
+		return;
+	}
+#endif
 #if DAEDALUS_S2DEX_COMBINER
 	if( gDraw2DCombiner && s <= 512.f && t <= 512.f )
 	{
@@ -1478,12 +1637,22 @@ void RendererPSP::DebugMux( const CBlendStates * states, DaedalusVtx * p_vertice
 
 
 
+#if DAEDALUS_GFX_STREAM
+RendererPSP * gRendererBack = nullptr;
+#endif
+
 bool CreateRenderer()
 {
 	#ifdef DAEDALUS_ENABLE_ASSERTS
 	DAEDALUS_ASSERT_Q(gRenderer == nullptr);
 	#endif
+#if DAEDALUS_GFX_STREAM
+	// The back end draws everything inside display lists, render targets included
+	gRendererBack = new RendererPSP( true );
+	gRendererPSP = new RendererPSP( false );
+#else
 	gRendererPSP = new RendererPSP();
+#endif
 	gRenderer    = gRendererPSP;
 	return true;
 }
@@ -1492,7 +1661,272 @@ void DestroyRenderer()
 	delete gRendererPSP;
 	gRendererPSP = nullptr;
 	gRenderer    = nullptr;
+#if DAEDALUS_GFX_STREAM
+	delete gRendererBack;
+	gRendererBack = nullptr;
+#endif
 }
+
+#if DAEDALUS_GFX_STREAM
+//*****************************************************************************
+// Display list record and replay (see SGfxState in BaseRenderer.h)
+//
+// The command buffer holds a header per command followed by its data. A
+// state record (GOP_STATE) is written before a command only when the state
+// differs from the last one written. If the buffer fills up in the middle of
+// a display list, what is there is replayed and recording starts again.
+//*****************************************************************************
+
+// Front end: write the state the next command needs, if it changed
+void RendererPSP::RecordState( u32 tile_idx )
+{
+	SGfxState st;
+	memset( &st, 0, sizeof( st ) );
+	st.OtherMode = gRDPOtherMode._u64;
+	st.Mux = mMux;
+	st.TnLFlags = mTnL.Flags._u32;
+	st.TextureTile = mTextureTile;
+	st.PrimDepth = mPrimDepth;
+	st.PrimLODFraction = mPrimLODFraction;
+	st.FogNear = mfog_near;
+	st.FogFar = mfog_far;
+	st.FogColour = mFogColour.GetColour();
+	st.PrimitiveColour = mPrimitiveColour.GetColour();
+	st.EnvColour = mEnvColour.GetColour();
+	st.BlendColour = mBlendColour.GetColour();
+	st.FillColour = mFillColour;
+	st.VpScale[ 0 ] = mVpScale.x;	st.VpScale[ 1 ] = mVpScale.y;
+	st.VpTrans[ 0 ] = mVpTrans.x;	st.VpTrans[ 1 ] = mVpTrans.y;
+	for( u32 i = 0; i < 4; ++i )
+		st.Scissor[ i ] = mScissor[ i ];
+	st.Draw2DCombiner = gDraw2DCombiner ? 1 : 0;
+	if( tile_idx != ~0u )
+	{
+		// The tiles UpdateTileSnapshots will use for this command
+		const u32 n = ( g_ROM.LOAD_T1_HACK & !gRDPOtherMode.text_lod ) ? 2 : 1;
+		for( u32 i = 0; i < n; ++i )
+		{
+			SReplayTile & t = st.Tiles[ i ];
+			t.Idx = tile_idx + i;
+			t.Ti = gRDPStateManager.GetUpdatedTextureDescriptor( tile_idx + i );
+			t.Tile = gRDPStateManager.GetTile( tile_idx + i );
+			t.Size = gRDPStateManager.GetTileSize( tile_idx + i );
+		}
+		st.NumTiles = n;
+	}
+	if( gLastStateValid && memcmp( &st, &gLastState, sizeof( st ) ) == 0 )
+		return;
+	memcpy( StreamAlloc( GOP_STATE, sizeof( st ) ), &st, sizeof( st ) );
+	gLastState = st;
+	gLastStateValid = true;
+}
+
+void RendererPSP::RecordProjection( const glm::mat4 & mat )
+{
+	static_cast<SOpProjection *>( StreamAlloc( GOP_PROJECTION, sizeof( SOpProjection ) ) )->Mat = mat;
+}
+
+std::shared_ptr<CNativeTexture> RendererPSP::LoadTextureDirectly( const TextureInfo & ti )
+{
+	if( !mRecording )
+		return BaseRenderer::LoadTextureDirectly( ti );
+	RecordState( ~0u );
+	const u32 id = gNextTextureId++;
+	SOpLoadTex * op = static_cast<SOpLoadTex *>( StreamAlloc( GOP_LOADTEX, sizeof( SOpLoadTex ) ) );
+	op->Ti = ti;
+	op->Texture = id;
+	return MakeTextureToken( id );
+}
+
+// Back end: make this renderer's state the recorded one
+void RendererPSP::ApplyState( const SGfxState & st )
+{
+	gRDPOtherMode._u64 = st.OtherMode;
+	mMux = st.Mux;
+	mTnL.Flags._u32 = st.TnLFlags;
+	mTextureTile = st.TextureTile;
+	mPrimDepth = st.PrimDepth;
+	mPrimLODFraction = st.PrimLODFraction;
+	mfog_near = st.FogNear;
+	mfog_far = st.FogFar;
+	mFogColour = c32( st.FogColour );
+	mPrimitiveColour = c32( st.PrimitiveColour );
+	mEnvColour = c32( st.EnvColour );
+	mBlendColour = c32( st.BlendColour );
+	mFillColour = st.FillColour;
+	if( mVpScale.x != st.VpScale[ 0 ] || mVpScale.y != st.VpScale[ 1 ] ||
+		mVpTrans.x != st.VpTrans[ 0 ] || mVpTrans.y != st.VpTrans[ 1 ] )
+	{
+		mVpScale = glm::vec2( st.VpScale[ 0 ], st.VpScale[ 1 ] );
+		mVpTrans = glm::vec2( st.VpTrans[ 0 ], st.VpTrans[ 1 ] );
+		UpdateViewport();
+	}
+	if( mScissor[ 0 ] != st.Scissor[ 0 ] || mScissor[ 1 ] != st.Scissor[ 1 ] ||
+		mScissor[ 2 ] != st.Scissor[ 2 ] || mScissor[ 3 ] != st.Scissor[ 3 ] )
+		SetScissor( st.Scissor[ 0 ], st.Scissor[ 1 ], st.Scissor[ 2 ], st.Scissor[ 3 ] );
+	gDraw2DCombiner = st.Draw2DCombiner != 0;
+	mReplayStateCopy = st;
+	mReplayState = &mReplayStateCopy;
+}
+
+void RendererPSP::BeginReplayFrame()
+{
+	// Same as the front end at the start of the display list
+	SetVIScales();
+	Reset();
+	BeginScene();
+	mScissor[ 0 ] = 0; mScissor[ 1 ] = 0; mScissor[ 2 ] = 320; mScissor[ 3 ] = 240;
+	mReplayState = nullptr;
+}
+
+void RendererPSP::EndReplayFrame()
+{
+	FlushPendingDraw();
+	mReplayState = nullptr;
+	EndScene();
+	for( u32 i = 0; i < kNumReplayTextures; ++i )
+		gReplayTextures[ i ] = nullptr;
+}
+
+void RendererPSP::ReplayCommands( const u8 * p, const u8 * p_end )
+{
+	// The shared globals hold the front end's values between replays: put
+	// back the last recorded ones (the first command may rely on them when
+	// the buffer was replayed in the middle of a display list)
+	if( mReplayState != nullptr )
+	{
+		gRDPOtherMode._u64 = mReplayState->OtherMode;
+		gDraw2DCombiner = mReplayState->Draw2DCombiner != 0;
+	}
+	while( p < p_end )
+	{
+		const SGfxOpHeader * h = reinterpret_cast<const SGfxOpHeader *>( p );
+		const void * data = h + 1;
+		p += sizeof( SGfxOpHeader ) + h->Bytes;
+
+		// Held back texture rectangles are drawn before anything else
+		// (DLParser_ProcessDList did the same before each other command)
+		if( h->Op != GOP_TEXRECT )
+			FlushPendingDraw();
+
+		switch( h->Op )
+		{
+		case GOP_STATE:
+			ApplyState( *static_cast<const SGfxState *>( data ) );
+			break;
+		case GOP_TRIS:
+		{
+			const SOpTris * op = static_cast<const SOpTris *>( data );
+			RenderTriangles( op->Verts, op->Count, op->DisableZ != 0 );
+			break;
+		}
+		case GOP_TEXRECT:
+		case GOP_TEXRECT_FLIP:
+		{
+			const SOpTexRect * op = static_cast<const SOpTexRect *>( data );
+			const glm::vec2 xy0( op->X0, op->Y0 ), xy1( op->X1, op->Y1 );
+			if( h->Op == GOP_TEXRECT )
+				TexRect( op->Tile, xy0, xy1, op->St0, op->St1 );
+			else
+				TexRectFlip( op->Tile, xy0, xy1, op->St0, op->St1 );
+			break;
+		}
+		case GOP_FILLRECT:
+		{
+			const SOpFillRect * op = static_cast<const SOpFillRect *>( data );
+			FillRect( glm::vec2( op->X0, op->Y0 ), glm::vec2( op->X1, op->Y1 ), op->Colour );
+			break;
+		}
+		case GOP_LOADTEX:
+		{
+			const SOpLoadTex * op = static_cast<const SOpLoadTex *>( data );
+			gReplayTextures[ op->Texture % kNumReplayTextures ] = BaseRenderer::LoadTextureDirectly( op->Ti );
+			break;
+		}
+		case GOP_DRAW2D:
+		case GOP_DRAW2D_R:
+		{
+			const SOpDraw2D * op = static_cast<const SOpDraw2D *>( data );
+			const std::shared_ptr<CNativeTexture> texture = gReplayTextures[ op->Texture % kNumReplayTextures ];
+			if( texture == nullptr )
+				break;		// the texture could not be created (drawing directly would have failed too)
+			const f32 * v = op->V;
+			if( h->Op == GOP_DRAW2D )
+				Draw2DTexture( v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], texture );
+			else
+				Draw2DTextureR( v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8], v[9], texture );
+			break;
+		}
+		case GOP_COLORIMAGE:
+		{
+			const SOpColorImage * op = static_cast<const SOpColorImage *>( data );
+			SetColorImage( op->Address, op->Width, op->Format, op->Size );
+			break;
+		}
+		case GOP_END_RENDER_TARGET:
+			EndRenderTarget();
+			break;
+		case GOP_CLEAR_Z:
+			CGraphicsContext::Get()->ClearZBuffer();
+			break;
+		case GOP_CLEAR_COLOUR:
+			CGraphicsContext::Get()->ClearColBuffer( c32( *static_cast<const u32 *>( data ) ) );
+			break;
+		case GOP_PROJECTION:
+			sceGuSetMatrix( GU_PROJECTION, reinterpret_cast< const ScePspFMatrix4 * >( &static_cast<const SOpProjection *>( data )->Mat ) );
+			break;
+		}
+	}
+}
+
+// Buffer clears from DLParser_FillRect: GE commands too, so recorded in order
+void RendererPSP::ClearZBuffer()
+{
+	if( mRecording )
+	{
+		FlushPendingDraw();
+		RecordState( ~0u );		// the clear is limited by the scissor
+		StreamAlloc( GOP_CLEAR_Z, 0 );
+		return;
+	}
+	CGraphicsContext::Get()->ClearZBuffer();
+}
+
+void RendererPSP::ClearColBuffer( c32 colour )
+{
+	if( mRecording )
+	{
+		FlushPendingDraw();
+		RecordState( ~0u );
+		*static_cast<u32 *>( StreamAlloc( GOP_CLEAR_COLOUR, sizeof( u32 ) ) ) = colour.GetColour();
+		return;
+	}
+	CGraphicsContext::Get()->ClearColBuffer( colour );
+}
+
+bool GfxStream_Begin()
+{
+	if( gRendererBack == nullptr || gGfxStreamOff )
+		return false;
+	gRendererBack->BeginReplayFrame();
+	gStreamPos = 0;
+	gLastStateValid = false;
+	gNextTextureId = 0;
+	gStreamActive = true;
+	gRendererPSP->SetRecording( true );
+	return true;
+}
+
+void GfxStream_End()
+{
+	if( !gStreamActive )
+		return;
+	gRendererPSP->SetRecording( false );
+	gStreamActive = false;
+	ReplayAll();
+	gRendererBack->EndReplayFrame();
+}
+#endif
 
 
 //*****************************************************************************
@@ -1542,6 +1976,16 @@ void RendererPSP::CreateRenderTargets()
 
 void RendererPSP::SetColorImage( u32 address, u32 width, u32 format, u32 size )
 {
+#if DAEDALUS_GFX_STREAM
+	if( mRecording )
+	{
+		FlushPendingDraw();
+		RecordState( ~0u );
+		SOpColorImage * op = static_cast<SOpColorImage *>( StreamAlloc( GOP_COLORIMAGE, sizeof( SOpColorImage ) ) );
+		op->Address = address; op->Width = width; op->Format = format; op->Size = size;
+		return;
+	}
+#endif
 	++gGuTextureEpoch;	// render to texture writes texture memory
 	EndRenderTarget();
 
@@ -1595,6 +2039,15 @@ void RendererPSP::SetColorImage( u32 address, u32 width, u32 format, u32 size )
 
 void RendererPSP::EndRenderTarget()
 {
+#if DAEDALUS_GFX_STREAM
+	if( mRecording )
+	{
+		FlushPendingDraw();
+		RecordState( ~0u );
+		StreamAlloc( GOP_END_RENDER_TARGET, 0 );
+		return;
+	}
+#endif
 	++gGuTextureEpoch;	// render to texture writes texture memory
 	if( mActiveRenderTarget == nullptr )
 		return;

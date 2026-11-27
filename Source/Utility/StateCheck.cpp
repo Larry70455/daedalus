@@ -58,6 +58,11 @@ static FILE *	gExcLog = nullptr;	// exclog=1: statecheck_exc.txt, one line per e
 static u32		gLoadAt = 0;	// loadat=N: load the savestate through the in game path (CPU_RequestLoadState) at vertical blank N instead of before starting
 static std::string	gSaveStatePath;
 static u32		gVerifyEvery = 0;		// verifyevery=N: check all compiled code against memory every N vertical blanks
+#if defined(DAEDALUS_PSP)
+extern bool		gGfxStreamOff;			// gfxstream=0: draw display lists directly (RendererPSP.cpp, DAEDALUS_GFX_STREAM)
+#else
+static bool		gGfxStreamOff = false;
+#endif
 static u32		gSaveAt = 0;			// saveat=N:path: write a savestate at vertical blank N
 static std::string	gSaveAtPath;
 struct SPress { u32 Start; u32 Length; u32 Buttons; };	// bits 16-23 / 24-31: analog stick x / y (signed), 0 = centre
@@ -131,6 +136,10 @@ bool StateCheck_Start()
 		else if( key == "patches" )		gPatchesOverride = std::atoi( value.c_str() );
 		else if( key == "memopt" )		gMemOptOverride = std::atoi( value.c_str() );
 		else if( key == "bit32" )		gBit32Override = std::atoi( value.c_str() );
+#if defined(DAEDALUS_PSP)
+		else if( key == "gfxsmall" )	{ extern u32 gGfxStreamLimit; gGfxStreamLimit = (u32)std::strtoul( value.c_str(), nullptr, 10 ); }	// test the full command buffer path
+#endif
+		else if( key == "gfxstream" )	gGfxStreamOff = value == "0";
 		else if( key == "verifyevery" )	gVerifyEvery = (u32)std::strtoul( value.c_str(), nullptr, 10 );
 		else if( key == "audio" )		gAudioOverride = std::atoi( value.c_str() );
 		else if( key == "loadat" )		gLoadAt = (u32)std::strtoul( value.c_str(), nullptr, 10 );
