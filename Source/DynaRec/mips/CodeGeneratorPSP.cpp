@@ -1675,6 +1675,31 @@ CJumpLocation CCodeGeneratorPSP::GenerateExitCode( u32 exit_address, u32 jump_ad
 				delay_ops[ 1 ] = delay_ops[ 0 ];	// into the J's slot, nothing in the BLEZ's
 				delay_ops[ 0 ]._u32 = 0;
 			}
+			// Fewer than two write-back ops (often none in hot loops): take
+			// ops from the end of the fragment's own code instead, when they
+			// don't touch S5. They keep their order and still run once on
+			// each path (see TakePrecedingOp).
+			if( num_delay_ops == 1 )
+			{
+				TakePrecedingOp( PspReg_S5, &delay_ops[ 0 ] );
+			}
+			else if( num_delay_ops == 0 )
+			{
+				PspOpCode last;
+				if( TakePrecedingOp( PspReg_S5, &last ) )
+				{
+					PspOpCode before;
+					if( TakePrecedingOp( PspReg_S5, &before ) )
+					{
+						delay_ops[ 0 ] = before;
+						delay_ops[ 1 ] = last;
+					}
+					else
+					{
+						delay_ops[ 0 ] = last;	// the BLEZ's slot runs on both paths
+					}
+				}
+			}
 		}
 
 		// Inline version of _DirectExitCheckNoDelay (DynaRecStubs.S): update

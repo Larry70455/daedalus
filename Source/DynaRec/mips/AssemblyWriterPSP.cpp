@@ -512,6 +512,33 @@ bool	CAssemblyWriterPSP::TakeDelaySlotOp( EPspReg a, EPspReg b, PspOpCode * p_op
 #endif
 }
 
+// Removes the last instruction in the current buffer and returns it, when
+// it may be moved later past code that only uses the registers in avoid: it
+// is a plain decoded ALU/load/store instruction that neither reads nor
+// writes any of them, nothing can jump to it or patch it and it is not in a
+// delay slot. Used to fill the delay slots of the inline exit check.
+bool	CAssemblyWriterPSP::TakePrecedingOp( EPspReg avoid, PspOpCode * p_op )
+{
+#if DAEDALUS_FILL_BRANCH_DELAY && DAEDALUS_FILL_BRANCH_DELAY_2
+	const u32 pos = mpCurrentBuffer->GetSize();
+	if( pos < 8 ) return false;
+	const u32 prev_pos = pos - 4;
+	if( mpCurrentBuffer->GetLastMarkPos() >= prev_pos ) return false;
+	const u32 prev = mpCurrentBuffer->GetWordAt( prev_pos );
+	if( prev == 0 || IsControlTransfer( prev ) ) return false;
+	if( IsControlTransfer( mpCurrentBuffer->GetWordAt( prev_pos - 4 ) ) ) return false;
+	u64 r, w;
+	bool m;
+	if( !GetRegisterUse( prev, &r, &w, &m ) ) return false;
+	if( ( r | w ) & ( 1ull << u32( avoid ) ) ) return false;
+	mpCurrentBuffer->Truncate( prev_pos );
+	p_op->_u32 = prev;
+	return true;
+#else
+	return false;
+#endif
+}
+
 CJumpLocation	CAssemblyWriterPSP::BranchOp( EPspReg a, OpCodeValue op, EPspReg b, CCodeLabel target, bool insert_delay )
 {
 	PspOpCode		delay_op {};

@@ -174,6 +174,8 @@ class CAssemblyWriterPSP
 			mpCurrentBuffer->EmitDWORD( op._u32 );
 		}
 
+		bool				TakePrecedingOp( EPspReg avoid, PspOpCode * p_op );
+
 	private:
 		bool				TakeDelaySlotOp( EPspReg a, EPspReg b, PspOpCode * p_op );
 		CJumpLocation		BranchOp( EPspReg a, OpCodeValue op, EPspReg b, CCodeLabel target, bool insert_delay );
