@@ -611,6 +611,25 @@ void NoteFlip()
 		gFlipsThisFrame++;
 }
 
+u32 Micros()
+{
+	return NowMicros();
+}
+
+void NoteDList( const u32 * phase_us, u32 commands, u32 list_address, u32 ucode_address, const char * name_b8, const char * name_df, bool capped )
+{
+	if( !gActive )
+		return;
+	const u32 total = phase_us[ 0 ] + phase_us[ 1 ] + phase_us[ 2 ] + phase_us[ 3 ] + phase_us[ 4 ];
+	if( total < 300000 && !capped )
+		return;
+	char line[ 400 ];
+	snprintf( line, sizeof( line ), "# slow display list at vi %u: %u ms (screen update %u, microcode setup %u, texture purge %u, parse and draw %u, finish %u), %u commands%s, list %08x, microcode %08x (b8 %s, df %s)\n",
+			  gFrameIndex, total / 1000, phase_us[ 0 ] / 1000, phase_us[ 1 ] / 1000, phase_us[ 2 ] / 1000, phase_us[ 3 ] / 1000, phase_us[ 4 ] / 1000,
+			  commands, capped ? " (runaway list, stopped)" : "", list_address, ucode_address, name_b8 != nullptr ? name_b8 : "?", name_df != nullptr ? name_df : "?" );
+	gPending += line;
+}
+
 void EndFrame()
 {
 	if( !gActive )

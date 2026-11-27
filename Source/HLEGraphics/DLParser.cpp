@@ -493,6 +493,23 @@ static void DLParser_RefreshKeepsPending()
 }
 #endif
 
+//*****************************************************************************
+// Runaway display lists (DAEDALUS_DLIST_CAP)
+//
+// A display list whose end the parser does not see (a microcode it took for
+// another, or a list the game had not finished) is read on through all of
+// N64 memory, each word taken as a command: several seconds of drawing
+// garbage on the PSP. Games use a few thousand commands per list (Super
+// Mario 64, Smash Bros, Yoshi's Story, Pokemon Stadium 2: 2250 to 3935 at
+// most), so a list is stopped after kMaxDListCommands. 0: no limit.
+//*****************************************************************************
+#ifndef DAEDALUS_DLIST_CAP
+#define DAEDALUS_DLIST_CAP 1
+#endif
+static const u32	kMaxDListCommands = 100000;
+static bool			gDListCapped = false;		// the last list was stopped
+static u32			gDListCommands = 0;			// commands in the last list
+
 static u32 DLParser_ProcessDList(u32 instruction_limit)
 {
 	MicroCodeCommand command;
@@ -501,9 +518,19 @@ static u32 DLParser_ProcessDList(u32 instruction_limit)
 #endif
 
 	u32 current_instruction_count = 0;
+	u32 commands = 0;
 
 	while(gDlistStackPointer >= 0)
 	{
+		++commands;
+#if DAEDALUS_DLIST_CAP
+		if( commands > kMaxDListCommands )
+		{
+			gDListCapped = true;	// runaway display list: stop here (see kMaxDListCommands)
+			gDlistStackPointer = -1;
+			break;
+		}
+#endif
 		if (!DLParser_FetchNextCommand( &command ))
 			break;
 
@@ -548,6 +575,7 @@ static u32 DLParser_ProcessDList(u32 instruction_limit)
 			}
 		}
 	}
+	gDListCommands = commands;
 
 	return current_instruction_count;
 }
@@ -689,8 +717,16 @@ u32 DLParser_Process(u32 instruction_limit, DLDebugOutput * debug_output)
 		gFirstCall = false;
 	}
 
+#ifdef DAEDALUS_PERF_LOG
+	u32 phase_us[ 5 ] = { 0, 0, 0, 0, 0 };
+	u32 phase_t = PerfLog::Micros();
+	#define DL_PHASE( i )	do { const u32 t = PerfLog::Micros(); phase_us[ i ] = t - phase_t; phase_t = t; } while( 0 )
+#else
+	#define DL_PHASE( i )	do {} while( 0 )
+#endif
 	// Update Screen only when something is drawn, otherwise several games ex Army Men will flash or shake.
 	if( g_ROM.GameHacks != CHAMELEON_TWIST_2 ) gGraphicsPlugin->UpdateScreen();
+	DL_PHASE( 0 );
 
 	OSTask * pTask = (OSTask *)(g_pu8SpMemBase + 0x0FC0);
 	u32 code_base = (u32)pTask->t.ucode & 0x1fffffff;
@@ -701,6 +737,7 @@ u32 DLParser_Process(u32 instruction_limit, DLDebugOutput * debug_output)
 	u32 stack_size = pTask->t.dram_stack_size >> 6;
 	
 	DLParser_InitMicrocode( code_base, code_size, data_base, data_size );
+	DL_PHASE( 1 );
 
 	//
 	// Not sure what to init this with. We should probably read it from the dmem
@@ -711,6 +748,7 @@ u32 DLParser_Process(u32 instruction_limit, DLDebugOutput * debug_output)
 	gRDPFrame++;
 
 	CTextureCache::Get()->PurgeOldTextures();
+	DL_PHASE( 2 );
 
 	// Initialise stack
 	gDlistStackPointer=0;
@@ -748,7 +786,10 @@ u32 DLParser_Process(u32 instruction_limit, DLDebugOutput * debug_output)
 		const bool recording = GfxStream_Begin();
 #endif
 		gRenderer->BeginScene();
+		gDListCapped = false;
+		gDListCommands = 0;
 		count = DLParser_ProcessDList(instruction_limit);
+		DL_PHASE( 3 );
 		gRenderer->FlushPendingDraw();
 		gRenderer->EndRenderTarget();
 		gRenderer->EndScene();
@@ -763,12 +804,17 @@ u32 DLParser_Process(u32 instruction_limit, DLDebugOutput * debug_output)
 			FinishRDPJob();
 		}
 #endif
+		DL_PHASE( 4 );
+#ifdef DAEDALUS_PERF_LOG
+		PerfLog::NoteDList( phase_us, gDListCommands, (u32)pTask->t.data_ptr, code_base, gUcodeName != nullptr ? gUcodeName[ 0xB8 ] : nullptr, gUcodeName != nullptr ? gUcodeName[ 0xDF ] : nullptr, gDListCapped );
+#endif
 	}
 	else
 	{
 		FinishRDPJob();
 	}
 
+	#undef DL_PHASE
 	// Hack for Chameleon Twist 2, only works if screen is update at last
 	if( g_ROM.GameHacks == CHAMELEON_TWIST_2 ) 
 		gGraphicsPlugin->UpdateScreen();

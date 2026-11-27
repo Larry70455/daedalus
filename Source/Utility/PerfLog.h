@@ -78,6 +78,12 @@ namespace PerfLog
 	void	SaveNow();		// Write everything collected so far (call when the game is paused)
 	void	EndFrame();		// Call once per N64 vertical blank
 	void	NoteFlip();		// Call when the game presents a new image
+	u32		Micros();		// Microsecond clock (differences only)
+	// One graphics task: times of its phases in microseconds (screen update,
+	// microcode setup, texture cache purge, list parse and draw, finish),
+	// its command count and whether it was stopped as a runaway list. Tasks
+	// over 300 ms or stopped are written to the log as a comment line.
+	void	NoteDList( const u32 * phase_us, u32 commands, u32 list_address, u32 ucode_address, const char * name_b8, const char * name_df, bool capped );
 
 	// Interpreter fallback counting (see FallbackThunk in PerfLog.cpp).
 	// gInterpretedOps counts ops run by the plain interpreter loop (code that
