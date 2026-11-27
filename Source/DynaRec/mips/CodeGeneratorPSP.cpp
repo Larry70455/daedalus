@@ -124,6 +124,12 @@ extern "C" { void _IndirectExitCached(); }	// a1 = map, a2 = target pc, see Dyna
 
 // 1: in 32 bit mode an upper half whose PSP register is an unmodified copy
 // of memory stays valid when the lower half is written (see ForgetHi)
+// 1: the rarely run parts of a fragment's final exit go to code buffer B
+// (see GenerateExitCode)
+#ifndef DAEDALUS_COLD_EXIT_PATHS
+#define DAEDALUS_COLD_EXIT_PATHS 1
+#endif
+
 #ifndef DAEDALUS_KEEP_CLEAN_HI
 #define DAEDALUS_KEEP_CLEAN_HI 1
 #endif
@@ -1671,6 +1677,21 @@ CJumpLocation CCodeGeneratorPSP::GenerateExitCode( u32 exit_address, u32 jump_ad
 		// An event is due: same as _DirectExitCheckCheckCount, then back to
 		// the dispatcher (which carries on at exit_address)
 		PatchJumpLong( to_event, GetAssemblyBuffer()->GetLabel() );
+#if DAEDALUS_COLD_EXIT_PATHS
+		// In the main code buffer, only a jump to buffer B stays here (with
+		// the J's delay slot op in its own delay slot): the event path and
+		// the "not compiled yet" path below are rarely run and used to fill
+		// the rest of hot instruction cache lines
+		const bool cold_in_b = IsBufferA();
+		if( cold_in_b )
+		{
+			CJumpLocation to_b( J( CCodeLabel( nullptr ), false ) );
+			AppendOp( delay_ops[ 1 ] );		// 0 is a NOP
+			SetBufferB();
+			PatchJumpLong( to_b, GetAssemblyBuffer()->GetLabel() );
+		}
+		else
+#endif
 		if( delay_ops[ 1 ]._u32 != 0 )
 			AppendOp( delay_ops[ 1 ] );
 		LoadConstant( PspReg_A1, exit_address );
@@ -1691,6 +1712,10 @@ CJumpLocation CCodeGeneratorPSP::GenerateExitCode( u32 exit_address, u32 jump_ad
 			J( CCodeLabel( reinterpret_cast< const void * >( _SyncAndReturnFromDynaRec ) ), true );
 			PatchJumpLong( jump_to_next_fragment, unlinked );
 		}
+#if DAEDALUS_COLD_EXIT_PATHS
+		if( cold_in_b )
+			SetBufferA();
+#endif
 		return jump_to_next_fragment;
 	}
 #endif
