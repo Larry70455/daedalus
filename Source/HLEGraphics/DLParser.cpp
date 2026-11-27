@@ -218,8 +218,21 @@ static inline bool IsVertexInfoValid(u32 address, u32 size, u32 v0, u32 n)
 //*****************************************************************************
 //
 //*****************************************************************************
+#if DAEDALUS_ME_GRAPHICS
+// Set while recording (possibly on the Media Engine): the main CPU raises
+// the interrupt after the display list was drawn (DLParser_Process)
+static bool gRDPFullSyncPending = false;
+#endif
+
 inline void FinishRDPJob()
 {
+#if DAEDALUS_ME_GRAPHICS
+	if( gRendererPSP->IsRecording() )
+	{
+		gRDPFullSyncPending = true;
+		return;
+	}
+#endif
 	Memory_MI_SetRegisterBits(MI_INTR_REG, MI_INTR_DP);
 	gCPUState.AddJob(CPU_CHECK_INTERRUPTS);
 }
@@ -607,6 +620,13 @@ u32 DLParser_Process(u32 instruction_limit, DLDebugOutput * debug_output)
 #if DAEDALUS_GFX_STREAM
 		if( recording )
 			GfxStream_End();
+#endif
+#if DAEDALUS_ME_GRAPHICS
+		if( gRDPFullSyncPending )
+		{
+			gRDPFullSyncPending = false;
+			FinishRDPJob();
+		}
 #endif
 	}
 	else

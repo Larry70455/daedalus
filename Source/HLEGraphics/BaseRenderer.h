@@ -255,6 +255,17 @@ static const u32 kMaxN64Vertices = 80;		// F3DLP.Rej supports up to 80 verts!
 #define DAEDALUS_GFX_STREAM 0
 #endif
 
+// The front end runs on the Media Engine (needs DAEDALUS_GFX_STREAM). The
+// Media Engine has no VFPU and cannot call the kernel, so the front end
+// then uses the C maths paths, no PerfLog timers, and leaves the end of
+// display list interrupt to the main CPU (see FinishRDPJob).
+#if defined(DAEDALUS_PSP) && !defined(DAEDALUS_ME_GRAPHICS)
+#define DAEDALUS_ME_GRAPHICS 0
+#endif
+#if defined(DAEDALUS_PSP) && DAEDALUS_ME_GRAPHICS && !DAEDALUS_GFX_STREAM
+#error "DAEDALUS_ME_GRAPHICS needs DAEDALUS_GFX_STREAM"
+#endif
+
 #if defined(DAEDALUS_PSP) && DAEDALUS_GFX_STREAM
 // A texture tile as the RDP state described it when a command was recorded
 struct SReplayTile

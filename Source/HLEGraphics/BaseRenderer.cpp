@@ -55,7 +55,18 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // glm::operator* to within float rounding, 200 random matrices).
 // All operands must be 16 byte aligned (they are the alignas members below).
 // out may be the same object as a or b: all inputs are loaded first.
-#ifdef DAEDALUS_PSP_USE_VFPU
+// Vertex, matrix and triangle code below is the display list front end.
+// With DAEDALUS_ME_GRAPHICS it runs on the Media Engine, which has no VFPU:
+// the C versions are used then (same pictures within rounding).
+#if defined(DAEDALUS_PSP_USE_VFPU) && !( defined(DAEDALUS_PSP) && DAEDALUS_ME_GRAPHICS )
+#define FRONT_USE_VFPU
+#endif
+#if defined(DAEDALUS_PSP) && DAEDALUS_ME_GRAPHICS
+#undef DAEDALUS_PERF_SCOPE
+#define DAEDALUS_PERF_SCOPE( category )		do {} while( 0 )	// no kernel timer calls on the Media Engine
+#endif
+
+#ifdef FRONT_USE_VFPU
 static inline void MatMul( glm::mat4 & out, const glm::mat4 & a, const glm::mat4 & b )
 {
 	__asm__ volatile (
@@ -557,7 +568,7 @@ bool BaseRenderer::AddTri(u32 v0, u32 v1, u32 v2)
 	//
 	if( mTnL.Flags.TriCull )
 	{
-#ifdef DAEDALUS_PSP_USE_VFPU
+#ifdef FRONT_USE_VFPU
 		const s32 sign = vfpu_TriNormSign((u8*)&mVtxProjected[0], v0, v1, v2);
 		if( sign <= 0 )
 #else
@@ -724,7 +735,7 @@ alignas(16) std::array<const glm::vec4, 6> NDCPlane =
 //*****************************************************************************
 //VFPU tris clip(fast)
 //*****************************************************************************
-#ifdef DAEDALUS_PSP_USE_VFPU
+#ifdef FRONT_USE_VFPU
 u32 clip_tri_to_frustum( DaedalusVtx4 * v0, DaedalusVtx4 * v1 )
 {
 	u32 vOut( 3 );
@@ -923,7 +934,7 @@ void BaseRenderer::PrepareTrisClipped( TempVerts * temp_verts ) const
 			//Make new triangles from the vertices we got back from clipping the original triangle
 			for( u32 j = 0; j <= out - 3; ++j)
 			{
-#ifdef DAEDALUS_PSP_USE_VFPU
+#ifdef FRONT_USE_VFPU
 				_ConvertVertice( &clip_vtx[ num_vertices++ ], &temp_a[ 0 ]);
 				_ConvertVertice( &clip_vtx[ num_vertices++ ], &temp_a[ j + 1 ]);
 				_ConvertVertice( &clip_vtx[ num_vertices++ ], &temp_a[ j + 2 ]);
@@ -958,7 +969,7 @@ void BaseRenderer::PrepareTrisClipped( TempVerts * temp_verts ) const
 				break;
 			}
 
-#ifdef DAEDALUS_PSP_USE_VFPU
+#ifdef FRONT_USE_VFPU
 			_ConvertVertice( &clip_vtx[ num_vertices++ ], &mVtxProjected[ idx0 ]);
 			_ConvertVertice( &clip_vtx[ num_vertices++ ], &mVtxProjected[ idx1 ]);
 			_ConvertVertice( &clip_vtx[ num_vertices++ ], &mVtxProjected[ idx2 ]);
@@ -1017,7 +1028,7 @@ void BaseRenderer::PrepareTrisUnclipped( TempVerts * temp_verts ) const
 	//
 	//DAEDALUS_STATIC_ASSERT( MAX_CLIPPED_VERTS > std::size(mIndexBuffer) );
 
-#ifdef DAEDALUS_PSP_USE_VFPU
+#ifdef FRONT_USE_VFPU
 	_ConvertVerticesIndexed( p_vertices, mVtxProjected, num_vertices, mIndexBuffer );
 #else
 	//
@@ -1036,7 +1047,7 @@ void BaseRenderer::PrepareTrisUnclipped( TempVerts * temp_verts ) const
  #endif
 }
 
-#ifndef DAEDALUS_PSP_USE_VFPU
+#ifndef FRONT_USE_VFPU
 //*****************************************************************************
 //
 //*****************************************************************************
@@ -1116,7 +1127,7 @@ void BaseRenderer::SetNewVertexInfo(u32 address, u32 v0, u32 n)
 	
 	const FiddledVtx * pVtxBase = (const FiddledVtx*)(g_pu8RamBase + address);
 
-#ifdef DAEDALUS_PSP_USE_VFPU
+#ifdef FRONT_USE_VFPU
 	if ( !mTnL.Flags.PointLight )
 	{	
 		//Normal rendering
@@ -1237,7 +1248,7 @@ void BaseRenderer::SetNewVertexInfo(u32 address, u32 v0, u32 n)
 		}
 #endif // DAEDALUS_PSP
 	}
-#endif // DAEDALUS_PSP_USE_VFPU
+#endif // FRONT_USE_VFPU
 }
 
 //*****************************************************************************
@@ -1256,7 +1267,7 @@ void BaseRenderer::SetNewVertexInfoConker(u32 address, u32 v0, u32 n)
 	const s8 *mn = (const s8*)(g_pu8RamBase + gAuxAddr);
 	const FiddledVtx * pVtxBase = (const FiddledVtx*)(g_pu8RamBase + address);
 	
-#ifdef DAEDALUS_PSP_USE_VFPU	
+#ifdef FRONT_USE_VFPU	
 	_TnLVFPUCBFD( &mat_world, &mat_project, pVtxBase, &mVtxProjected[v0], n, &mTnL, mn, v0<<1 );
 #else
 	// Transform and Project + Lighting or Transform and Project with Colour
@@ -1399,7 +1410,7 @@ void BaseRenderer::SetNewVertexInfoDKR(u32 address, u32 v0, u32 n, bool billboar
 		//Copy vertices adding base vector and the color data
 		mWPmodified = false;
 
-#ifdef DAEDALUS_PSP_USE_VFPU
+#ifdef FRONT_USE_VFPU
 		_TnLVFPUDKRB( n, &mModelViewStack[0], (const FiddledVtx*)pVtxBase, &mVtxProjected[v0] );
 #else
 		glm::vec4 & BaseVec( mVtxProjected[0].TransformedPos );
@@ -1459,7 +1470,7 @@ void BaseRenderer::SetNewVertexInfoDKR(u32 address, u32 v0, u32 n, bool billboar
 			mWPmodified = false;
 			SetGuProjection( mat_world_project );
 		}
-#ifdef DAEDALUS_PSP_USE_VFPU
+#ifdef FRONT_USE_VFPU
 		_TnLVFPUDKR( n, &mat_world_project, (const FiddledVtx*)pVtxBase, &mVtxProjected[v0] );
 #else
 		for (u32 i = v0; i < v0 + n; i++)
@@ -1507,7 +1518,7 @@ void BaseRenderer::SetNewVertexInfoPD(u32 address, u32 v0, u32 n)
 	const u8 *mn = (const u8*)(g_pu8RamBase + gAuxAddr);
 	const FiddledVtxPD * const pVtxBase = (const FiddledVtxPD*)(g_pu8RamBase + address);
 
-#ifdef DAEDALUS_PSP_USE_VFPU	
+#ifdef FRONT_USE_VFPU	
 	_TnLVFPUPD( &mat_world, &mat_project, pVtxBase, &mVtxProjected[v0], n, &mTnL, mn );
 #else
 	for (u32 i = v0; i < v0 + n; i++)
