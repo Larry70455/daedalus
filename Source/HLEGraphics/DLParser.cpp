@@ -32,6 +32,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "HLEGraphics/ConvertFormats.h"			// YUVtoRGBA
 #include "HLEGraphics/DLDebug.h"
 #include "HLEGraphics/DLParser.h"
+#include "HLEGraphics/MEShared.h"
 #if defined(DAEDALUS_PSP)
 #include "SysPSP/HLEGraphics/RendererPSP.h"
 #endif
@@ -161,19 +162,31 @@ void RDP_MoveMemLight(u32 address, u32 light_idx);
 // Used to keep track of when we're processing the first display list
 static bool gFirstCall = true;
 
-static u32				gSegments[16];
-static RDP_Scissor		scissors;
-static RDP_GeometryMode gGeometryMode;
-static DList			gDlistStack;
-static s32				gDlistStackPointer = -1;
-static u32				gRDPHalf1 = 0;
+// Written by the display list front end: each in cache lines of its own (see MEShared.h)
+static SMELine<u32[16]>				gSegments_;				// gSegments
+static SMELine<RDP_Scissor>			scissors_;				// scissors
+static SMELine<RDP_GeometryMode>	gGeometryMode_;			// gGeometryMode
+static SMELine<DList>				gDlistStack_;			// gDlistStack
+static SMELine<s32>					gDlistStackPointer_ = { -1 };
+static SMELine<u32>					gRDPHalf1_ = { 0 };
+#define gSegments			(gSegments_.v)
+#define scissors			(scissors_.v)
+#define gGeometryMode		(gGeometryMode_.v)
+#define gDlistStack			(gDlistStack_.v)
+#define gDlistStackPointer	(gDlistStackPointer_.v)
+#define gRDPHalf1			(gRDPHalf1_.v)
 
-       SImageDescriptor g_TI = { G_IM_FMT_RGBA, G_IM_SIZ_16b, 1, 0 };
-static SImageDescriptor g_CI = { G_IM_FMT_RGBA, G_IM_SIZ_16b, 1, 0 };
-static SImageDescriptor g_DI = { G_IM_FMT_RGBA, G_IM_SIZ_16b, 1, 0 };
+       SMELine<SImageDescriptor> g_TI_ = { { G_IM_FMT_RGBA, G_IM_SIZ_16b, 1, 0 } };
+static SMELine<SImageDescriptor> g_CI_ = { { G_IM_FMT_RGBA, G_IM_SIZ_16b, 1, 0 } };
+static SMELine<SImageDescriptor> g_DI_ = { { G_IM_FMT_RGBA, G_IM_SIZ_16b, 1, 0 } };
+#define g_TI	(g_TI_.v)
+#define g_CI	(g_CI_.v)
+#define g_DI	(g_DI_.v)
 
-const MicroCodeInstruction *gUcodeFunc = gNormalInstruction[ GBI_0 ];
-static const char ** gUcodeName = gNormalInstructionName[ GBI_0 ];
+SMELine<const MicroCodeInstruction *> gUcodeFunc_ = { gNormalInstruction[ GBI_0 ] };
+static SMELine<const char **> gUcodeName_ = { gNormalInstructionName[ GBI_0 ] };
+#define gUcodeFunc	(gUcodeFunc_.v)
+#define gUcodeName	(gUcodeName_.v)
 
 bool gFrameskipActive = false;
 
@@ -221,7 +234,8 @@ static inline bool IsVertexInfoValid(u32 address, u32 size, u32 v0, u32 n)
 #if DAEDALUS_ME_GRAPHICS
 // Set while recording (possibly on the Media Engine): the main CPU raises
 // the interrupt after the display list was drawn (DLParser_Process)
-static bool gRDPFullSyncPending = false;
+static SMELine<bool> gRDPFullSyncPending_ = { false };
+#define gRDPFullSyncPending	(gRDPFullSyncPending_.v)
 #endif
 
 inline void FinishRDPJob()
@@ -282,7 +296,8 @@ u32			gNumInstructionsExecuted = 0;
 //
 //*****************************************************************************
 u32 gRDPFrame = 0;
-u32 gAuxAddr = 0;
+SMELine<u32> gAuxAddr_ = { 0 };		// gAuxAddr (written by the front end, see MEShared.h)
+#define gAuxAddr	(gAuxAddr_.v)
 
 extern u32 uViWidth;
 extern u32 uViHeight;
@@ -463,8 +478,8 @@ static inline bool DLParser_KeepsPendingDraw( MicroCodeInstruction f )
 // The same answer per command byte. The microcode table can be swapped or
 // rewritten in place (custom microcodes), so its contents are compared
 // each time the microcode is set up (once per display list).
-static MicroCodeInstruction	gKeepsPendingFuncs[ 256 ];
-static bool					gKeepsPending[ 256 ];
+alignas(64) static MicroCodeInstruction	gKeepsPendingFuncs[ 256 ];	// whole cache lines (MEShared.h)
+alignas(64) static bool					gKeepsPending[ 256 ];
 static void DLParser_RefreshKeepsPending()
 {
 	if( memcmp( gKeepsPendingFuncs, gUcodeFunc, sizeof( gKeepsPendingFuncs ) ) == 0 )

@@ -2,6 +2,8 @@
 #include "Base/Types.h"
 
 #include <pspgu.h>
+#include <malloc.h>
+#include <new>
 #include <glm/gtc/type_ptr.hpp>  
 #include "Combiner/BlendConstant.h"
 #include "Combiner/CombinerTree.h"
@@ -48,7 +50,8 @@ extern void InitBlenderMode( u32 blender );
 #ifndef DAEDALUS_S2DEX_COMBINER
 #define DAEDALUS_S2DEX_COMBINER 1
 #endif
-bool gDraw2DCombiner = false;	// set by S2DEX_DRAW_SCOPE (Ucode_S2DEX.h)
+SMELine<bool> gDraw2DCombiner_ = { false };	// set by S2DEX_DRAW_SCOPE (Ucode_S2DEX.h); cache lines of its own (MEShared.h)
+#define gDraw2DCombiner	(gDraw2DCombiner_.v)
 bool gGfxStreamOff = false;
 u32 gGfxStreamLimit = 256 * 1024;	// command buffer limit (test harness: StateCheck gfxsmall=N to exercise the full buffer path)
 
@@ -84,15 +87,20 @@ namespace
 
 	const u32				kStreamBytes = 256 * 1024;
 	alignas(64) u8			gStream[ kStreamBytes ];
-	u32						gStreamPos = 0;
+	// Written by the front end: cache lines of their own (MEShared.h)
+	SMELine<u32>			gStreamPos_ = { 0 };
+	#define gStreamPos			(gStreamPos_.v)
 	bool					gStreamActive = false;
-	SGfxState				gLastState;
-	bool					gLastStateValid = false;
+	SMELine<SGfxState>		gLastState_;
+	#define gLastState			(gLastState_.v)
+	SMELine<bool>			gLastStateValid_ = { false };
+	#define gLastStateValid		(gLastStateValid_.v)
 
 	// Textures loaded with LoadTextureDirectly: the front end hands out a
 	// placeholder holding a number, the back end keeps the real ones
 	const u32				kNumReplayTextures = 64;
-	u32						gNextTextureId = 0;
+	SMELine<u32>			gNextTextureId_ = { 0 };
+	#define gNextTextureId		(gNextTextureId_.v)
 	std::shared_ptr<CNativeTexture>	gReplayTextures[ kNumReplayTextures ];
 
 	inline std::shared_ptr<CNativeTexture> MakeTextureToken( u32 id )
@@ -111,8 +119,10 @@ namespace
 	// that memory (it changes at each vertical blank) or the GE list.
 	const u32				kFrontVertexBytes = 512 * 1024;
 	alignas(64) u8			gFrontVertices[ kFrontVertexBytes ];
-	u32						gFrontVerticesUsed = 0;
-	u8 *					gFrontVerticesEnd = nullptr;	// exact end of the last allocation
+	SMELine<u32>			gFrontVerticesUsed_ = { 0 };
+	#define gFrontVerticesUsed	(gFrontVerticesUsed_.v)
+	SMELine<u8 *>			gFrontVerticesEnd_ = { nullptr };	// exact end of the last allocation
+	#define gFrontVerticesEnd	(gFrontVerticesEnd_.v)
 
 	void ReplayAll()
 	{
@@ -392,6 +402,31 @@ void RendererPSP::ResetDebugState()
 }
 #endif
 
+#if DAEDALUS_ME_GRAPHICS
+//*****************************************************************************
+// Blend lookups for the front end on the Media Engine
+//
+// CanMergeDraws (front end) needs to know whether a combiner is drawn in
+// several passes, but LookupBlendState builds its answer with heap
+// allocations the Media Engine cannot make. The back end (main CPU) writes
+// each answer it finds into this fixed table, between Media Engine jobs;
+// the front end only reads it. A combiner not in the table yet is treated
+// as several passes: that batch is not merged, which only costs speed.
+//*****************************************************************************
+namespace
+{
+	const u32				kNumMultiPassEntries = 256;
+	struct SMultiPassEntry	{ u64 Key; u32 MultiPass; u32 Valid; };
+	alignas(64) SMultiPassEntry	gMultiPass[ kNumMultiPassEntries ];
+
+	inline u32 MultiPassSlot( u64 key )
+	{
+		const u32 h = u32( key ) ^ u32( key >> 32 );
+		return ( h ^ ( h >> 13 ) ^ ( h >> 7 ) ) & ( kNumMultiPassEntries - 1 );
+	}
+}
+#endif
+
 RendererPSP::SBlendStateEntry RendererPSP::LookupBlendState( u64 mux, bool two_cycles )
 {
 	#ifdef DAEDALUS_DEBUG_DISPLAYLIST
@@ -413,6 +448,15 @@ RendererPSP::SBlendStateEntry RendererPSP::LookupBlendState( u64 mux, bool two_c
 	{
 		mLastBlendKey = key._u64;
 		mLastBlendEntry = it->second;
+#if DAEDALUS_ME_GRAPHICS
+		if( !mRecording )	// refresh it for the front end (another combiner may have taken the slot)
+		{
+			SMultiPassEntry & e = gMultiPass[ MultiPassSlot( key._u64 ) ];
+			e.Key = key._u64;
+			e.MultiPass = ( it->second.OverrideFunction == nullptr && it->second.States != nullptr && it->second.States->GetNumStates() > 1 ) ? 1 : 0;
+			e.Valid = 1;
+		}
+#endif
 		return it->second;
 	}
 
@@ -442,6 +486,16 @@ RendererPSP::SBlendStateEntry RendererPSP::LookupBlendState( u64 mux, bool two_c
 	mLastBlendKey = key._u64;
 	mLastBlendEntry = entry;
 
+#if DAEDALUS_ME_GRAPHICS
+	// For the front end (see gMultiPass): the condition CanMergeDraws uses
+	if( !mRecording )
+	{
+		SMultiPassEntry & e = gMultiPass[ MultiPassSlot( key._u64 ) ];
+		e.Key = key._u64;
+		e.MultiPass = ( entry.OverrideFunction == nullptr && entry.States != nullptr && entry.States->GetNumStates() > 1 ) ? 1 : 0;
+		e.Valid = 1;
+	}
+#endif
 	return entry;
 }
 
@@ -462,6 +516,19 @@ bool RendererPSP::CanMergeDraws()
 	const u32 cycle_mode = gRDPOtherMode.cycle_type;
 	if( cycle_mode == CYCLE_1CYCLE || cycle_mode == CYCLE_2CYCLE )
 	{
+#if DAEDALUS_ME_GRAPHICS
+		if( mRecording )
+		{
+			// No allocation here (see gMultiPass)
+			REG64 key;
+			key._u64 = mMux;
+			key._u32_1 |= ( ( cycle_mode == CYCLE_2CYCLE ) << 31 );
+			const SMultiPassEntry & e = gMultiPass[ MultiPassSlot( key._u64 ) ];
+			if( !e.Valid || e.Key != key._u64 || e.MultiPass )
+				return false;
+			return true;
+		}
+#endif
 		const SBlendStateEntry entry = LookupBlendState( mMux, cycle_mode == CYCLE_2CYCLE );
 		if( entry.OverrideFunction == nullptr && entry.States != nullptr && entry.States->GetNumStates() > 1 )
 			return false;
@@ -1658,7 +1725,14 @@ bool CreateRenderer()
 #if DAEDALUS_GFX_STREAM
 	// The back end draws everything inside display lists, render targets included
 	gRendererBack = new RendererPSP( true );
+#if DAEDALUS_ME_GRAPHICS
+	// The front end writes this object on the Media Engine: whole cache
+	// lines of its own (see MEShared.h)
+	void * front_memory = memalign( 64, ( sizeof( RendererPSP ) + 63 ) & ~63u );
+	gRendererPSP = new( front_memory ) RendererPSP( false );
+#else
 	gRendererPSP = new RendererPSP( false );
+#endif
 #else
 	gRendererPSP = new RendererPSP();
 #endif
@@ -1667,7 +1741,12 @@ bool CreateRenderer()
 }
 void DestroyRenderer()
 {
+#if DAEDALUS_GFX_STREAM && DAEDALUS_ME_GRAPHICS
+	gRendererPSP->~RendererPSP();
+	free( gRendererPSP );
+#else
 	delete gRendererPSP;
+#endif
 	gRendererPSP = nullptr;
 	gRenderer    = nullptr;
 #if DAEDALUS_GFX_STREAM

@@ -33,24 +33,25 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <cmath>
 
 
-extern SImageDescriptor g_TI;		//Texture data from Timg ucode
+extern SMELine<SImageDescriptor> g_TI_;	// DLParser.cpp
+#define g_TI	(g_TI_.v)		//Texture data from Timg ucode
 
-CRDPStateManager gRDPStateManager;
+SMELine<CRDPStateManager> gRDPStateManager_;
 
 static const char * const kTLUTTypeName[] = {"None", "?", "RGBA16", "IA16"};
 
-RDP_OtherMode		gRDPOtherMode;
+SMELine<RDP_OtherMode>	gRDPOtherMode_;
 
 #define MAX_TMEM_ADDRESS 4096
 
 //Granularity down to 24bytes is good enuff also only need to address the upper half of TMEM for palettes//Corn
 
 // std::array<u32,MAX_TMEM_ADDRESS >> 6> gTlutLoadAddresses;
-u32 gTlutLoadAddresses[ MAX_TMEM_ADDRESS >> 6 ];
+SMELine<u32[ ( MAX_TMEM_ADDRESS >> 6 ) ]> gTlutLoadAddresses_;
 
 
 #ifdef DAEDALUS_ACCURATE_TMEM
-u8 gTMEM[ MAX_TMEM_ADDRESS ];
+alignas(64) u8 gTMEM[ MAX_TMEM_ADDRESS ];	// whole cache lines: written by the front end (MEShared.h)
 #endif
 
 

@@ -21,6 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #ifndef HLEGRAPHICS_RDPSTATEMANAGER_H_
 #define HLEGRAPHICS_RDPSTATEMANAGER_H_
 
+#include "HLEGraphics/MEShared.h"
 #include "HLEGraphics/RDP.h"
 #include "HLEGraphics/TextureInfo.h"
 
@@ -93,10 +94,14 @@ private:
 	bool					EmulateMirror;
 };
 
-extern CRDPStateManager		gRDPStateManager;
-extern RDP_OtherMode		gRDPOtherMode;
+// Written by the display list front end: in cache lines of their own (MEShared.h)
+extern SMELine<CRDPStateManager>	gRDPStateManager_;
+extern SMELine<RDP_OtherMode>		gRDPOtherMode_;
+#define gRDPStateManager	(gRDPStateManager_.v)
+#define gRDPOtherMode		(gRDPOtherMode_.v)
 
-extern u32 gTlutLoadAddresses[ 4096 >> 6 ];
+extern SMELine<u32[ ( 4096 >> 6 ) ]> gTlutLoadAddresses_;
+#define gTlutLoadAddresses	(gTlutLoadAddresses_.v)
 
 
 #endif // HLEGRAPHICS_RDPSTATEMANAGER_H_

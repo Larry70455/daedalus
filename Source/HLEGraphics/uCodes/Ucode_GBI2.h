@@ -90,8 +90,10 @@ void DLParser_GBI2_PopMtx( MicroCodeCommand command )
 //001889F0: DB020000 00000030 CMD Zelda_MOVEWORD  Mem[2][00]=00000030 Lightnum=2
 void DLParser_GBI2_MoveWord( MicroCodeCommand command )
 {
-	static f32 old_fog_mult;
-	static f32 old_fog_offs;
+	static SMELine<f32> old_fog_mult_;	// written by the front end (MEShared.h)
+	static SMELine<f32> old_fog_offs_;
+	f32 & old_fog_mult = old_fog_mult_.v;
+	f32 & old_fog_offs = old_fog_offs_.v;
 	
 	u32 value  = command.mw2.value;
 	u32 offset = command.mw2.offset;

@@ -201,7 +201,9 @@ u32		_ClipToHyperPlane( DaedalusVtx4 * dest, const DaedalusVtx4 * source, const 
 #undef max
 
 extern bool gRumblePakActive;
-extern u32 gAuxAddr;
+#include "HLEGraphics/MEShared.h"
+extern SMELine<u32> gAuxAddr_;	// DLParser.cpp
+#define gAuxAddr	(gAuxAddr_.v)
 
 static f32 fViWidth = 320.0f;
 static f32 fViHeight = 240.0f;
@@ -878,11 +880,11 @@ namespace
 {
 	// std::array<DaedalusVtx4, 8> temp_a;
 	// std::array<DaedalusVtx4, 8> temp_b;
-	DaedalusVtx4		temp_a[ 8 ];
-	DaedalusVtx4		temp_b[ 8 ];
+	alignas(64) DaedalusVtx4		temp_a[ 8 ];	// whole cache lines: written by the front end (MEShared.h)
+	alignas(64) DaedalusVtx4		temp_b[ 8 ];
 	// Flying Dragon clips more than 256
 	const u32			MAX_CLIPPED_VERTS = 320;
-	DaedalusVtx			clip_vtx[MAX_CLIPPED_VERTS];
+	alignas(64) DaedalusVtx			clip_vtx[MAX_CLIPPED_VERTS];
 	// std::array<DaedalusVtx, MAX_CLIPPED_VERTS> clip_vtx;
 }
 

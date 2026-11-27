@@ -25,7 +25,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // PSP: sprites and backgrounds drawn while this scope is active use the
 // current combiner, blender and alpha compare (RendererPSP::Draw2DTexture)
 #ifdef DAEDALUS_PSP
-extern bool gDraw2DCombiner;
+extern SMELine<bool> gDraw2DCombiner_;	// RendererPSP.cpp
+#define gDraw2DCombiner	(gDraw2DCombiner_.v)
 struct SS2DEXDrawScope
 {
 	SS2DEXDrawScope()	{ gDraw2DCombiner = true; }
@@ -84,7 +85,9 @@ struct Matrix2D
 	f32 X, Y;
 	f32 BaseScaleX;
 	f32 BaseScaleY;
-} mat2D = {1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f };
+};
+static SMELine<Matrix2D> mat2D_ = { {1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f } };	// written by the front end (MEShared.h)
+#define mat2D	(mat2D_.v)
 
 //*****************************************************************************
 //
@@ -228,7 +231,8 @@ enum ESpriteMode
 	NO_ROTATION
 };
 
-static uObjTxtr *gObjTxtr = NULL;
+static SMELine<uObjTxtr *> gObjTxtr_ = { NULL };	// written by the front end (MEShared.h)
+#define gObjTxtr	(gObjTxtr_.v)
 //*****************************************************************************
 //
 //*****************************************************************************

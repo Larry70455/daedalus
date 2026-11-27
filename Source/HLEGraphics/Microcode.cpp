@@ -17,6 +17,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 
+#include "HLEGraphics/MEShared.h"
 #include "Base/Types.h"
 #include "HLEGraphics/Microcode.h"
 
@@ -40,8 +41,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //*****************************************************************************
 static void GBIMicrocode_SetCustomArray( u32 ucode_version, u32 ucode_offset );
 
-static MicroCodeInstruction gCustomInstruction[256];
-static const char * gCustomInstructionName[256];
+alignas(64) static MicroCodeInstruction gCustomInstruction[256];	// whole cache lines: written by the front end (MEShared.h)
+alignas(64) static const char * gCustomInstructionName[256];
 #define SetCommand( cmd, func, name )	\
 	gCustomInstruction[ cmd ] = func;	\
 	gCustomInstructionName[ cmd ] = name;
@@ -76,7 +77,8 @@ struct UcodeUsage
 };
 
 
-static UcodeUsage gUcodeUsage[ MAX_UCODE_CACHE_ENTRIES ];
+static SMELine<UcodeUsage[ MAX_UCODE_CACHE_ENTRIES ]> gUcodeUsage_;	// written by the front end (MEShared.h)
+#define gUcodeUsage	(gUcodeUsage_.v)
 
 static bool	GBIMicrocode_DetectVersionString( u32 data_base, u32 data_size, char * str, u32 str_len )
 {

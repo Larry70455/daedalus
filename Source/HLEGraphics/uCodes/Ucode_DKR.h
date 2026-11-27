@@ -20,9 +20,13 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #ifndef HLEGRAPHICS_UCODES_UCODE_DKR_H_
 #define HLEGRAPHICS_UCODES_UCODE_DKR_H_
 
-u32 gDKRMatrixAddr = 0;
-u32 gDKRVtxCount = 0;
-bool gDKRBillBoard = false;
+// Written by the display list front end (see MEShared.h)
+SMELine<u32> gDKRMatrixAddr_ = { 0 };
+SMELine<u32> gDKRVtxCount_ = { 0 };
+SMELine<bool> gDKRBillBoard_ = { false };
+#define gDKRMatrixAddr	(gDKRMatrixAddr_.v)
+#define gDKRVtxCount	(gDKRVtxCount_.v)
+#define gDKRBillBoard	(gDKRBillBoard_.v)
 
 // DKR verts are 10 bytes
 #ifdef DAEDALUS_DEBUG_DISPLAYLIST

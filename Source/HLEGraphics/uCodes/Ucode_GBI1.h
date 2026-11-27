@@ -176,8 +176,10 @@ void DLParser_GBI1_MoveMem( MicroCodeCommand command )
 //*****************************************************************************
 void DLParser_GBI1_MoveWord( MicroCodeCommand command )
 {
-	static f32 old_fog_mult;
-	static f32 old_fog_offs;
+	static SMELine<f32> old_fog_mult_;	// written by the front end (MEShared.h)
+	static SMELine<f32> old_fog_offs_;
+	f32 & old_fog_mult = old_fog_mult_.v;
+	f32 & old_fog_offs = old_fog_offs_.v;
 	
 	// Type of movement is in low 8bits of cmd0.
 	u32 value  = command.mw1.value;

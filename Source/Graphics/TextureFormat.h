@@ -43,25 +43,21 @@ inline bool IsTextureFormatPalettised( ETextureFormat texture_format )
 }
 
 
+// A switch, not a table built on first use: no allocation or thread safe
+// initialisation (kernel calls), so the display list front end can use it
+// on the Media Engine
 inline uint32_t GetBitsPerPixel(ETextureFormat texture_format)
 {
-    static const std::unordered_map<ETextureFormat, uint32_t> format_to_bpp{
-        {ETextureFormat::TexFmt_5650, 16},
-        {ETextureFormat::TexFmt_5551, 16},
-        {ETextureFormat::TexFmt_4444, 16},
-        {ETextureFormat::TexFmt_8888, 32},
-        {ETextureFormat::TexFmt_CI4_8888, 4},
-        {ETextureFormat::TexFmt_CI8_8888, 8}
-    };
-    
-    auto it = format_to_bpp.find(texture_format);
-    
-    if (it == format_to_bpp.end()) {
-        // Log error here, "Unhandled texture format"
-        return 8;  // Default bits per pixel
+    switch (texture_format)
+    {
+    case ETextureFormat::TexFmt_5650:		return 16;
+    case ETextureFormat::TexFmt_5551:		return 16;
+    case ETextureFormat::TexFmt_4444:		return 16;
+    case ETextureFormat::TexFmt_8888:		return 32;
+    case ETextureFormat::TexFmt_CI4_8888:	return 4;
+    case ETextureFormat::TexFmt_CI8_8888:	return 8;
+    default:								return 8;	// Unhandled texture format
     }
-    
-    return it->second;
 }
 inline u32		CalcBytesRequired( u32 pixels, ETextureFormat texture_format )
 {
