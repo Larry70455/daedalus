@@ -141,12 +141,36 @@ void  CPU_InvalidateICacheRange( u32 address, u32 length )
 //	flush, even with selective invalidation (Pokemon Stadium 2 with OS patches
 //	off ran stale code otherwise).
 //*****************************************************************************
+//	DAEDALUS_VERIFY_ON_INDEX_INVALIDATE 1: instead of the full flush, every
+//	fragment's N64 code is compared with memory at the next safe point and
+//	only the changed ones are dropped. Games run the index invalidation loop
+//	often (Pokemon Stadium 2: about once a second), mostly without changing
+//	compiled code, and each full flush meant recompiling everything: a lag
+//	spike of 100 to 700 ms. Comparing the actual code is also safe where
+//	the page based check was not (the case above).
+//*****************************************************************************
+#ifndef DAEDALUS_VERIFY_ON_INDEX_INVALIDATE
+#define DAEDALUS_VERIFY_ON_INDEX_INVALIDATE 1
+#endif
+
+// Test harness (StateCheck verifyevery=N): ask for the same check now
+void CPU_RequestCodeVerify()
+{
+#if DAEDALUS_SELECTIVE_INVALIDATE
+	gFragmentCache.QueueVerifyAll();
+#endif
+}
 void  CPU_InvalidateICacheIndexed( u32 address )
 {
 	if( gFragmentCache.ShouldInvalidateOnWrite( address, 0x20 ) )
 	{
+#if DAEDALUS_SELECTIVE_INVALIDATE && DAEDALUS_VERIFY_ON_INDEX_INVALIDATE
+		DAEDALUS_PERF_STAT( kStatVerifyICache );	// No-op unless DAEDALUS_PERF_LOG
+		gFragmentCache.QueueVerifyAll();
+#else
 		DAEDALUS_PERF_STAT( kStatFlushICache );	// No-op unless DAEDALUS_PERF_LOG
 		CPU_ResetFragmentCache();
+#endif
 	}
 }
 
@@ -743,5 +767,6 @@ void CPU_ResetFragmentCache() {}
 void Dynamo_Reset() {}
 void  CPU_InvalidateICacheRange( u32 address [[maybe_unused]], u32 length [[maybe_unused]] ) {}
 void  CPU_InvalidateICacheIndexed( u32 address [[maybe_unused]] ) {}
+void CPU_RequestCodeVerify() {}
 
 #endif //DAEDALUS_ENABLE_DYNAREC

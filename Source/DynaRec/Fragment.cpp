@@ -139,6 +139,53 @@ static const u32 kNumCodePages = ( 8 * 1024 * 1024 ) >> 12;
 // Filled by the code generator while a fragment is assembled (see above)
 std::vector< std::pair< u32, u32 > >	gDeadExitScanRanges;
 
+//*************************************************************************************
+//	Code checksum: FNV-1a over the N64 instruction words a fragment was
+//	compiled from. A word that cannot be read makes the checksum invalid,
+//	so the fragment counts as changed (see IsCodeUnchanged).
+//*************************************************************************************
+static const u32 kInvalidCodeHash = 0;
+
+static u32 HashCodeRuns( const std::vector< std::pair< u32, u32 > > & runs )
+{
+	u32 h = 2166136261u;
+	for( const auto & run : runs )
+	{
+		for( u32 i = 0; i < run.second; ++i )
+		{
+			const u32 address = run.first + i * 4;
+			const MemFuncRead & m( g_MemoryLookupTableRead[ address >> 18 ] );
+			if( m.pRead == nullptr )
+				return kInvalidCodeHash;
+			const u32 word = *reinterpret_cast< const u32 * >( m.pRead + address );
+			h = ( h ^ word ) * 16777619u;
+			h = ( h ^ ( word >> 16 ) ) * 16777619u;
+		}
+	}
+	return h == kInvalidCodeHash ? 1 : h;
+}
+
+void CFragment::SetCodeWords( std::vector< u32 > & addresses )
+{
+	std::sort( addresses.begin(), addresses.end() );
+	addresses.erase( std::unique( addresses.begin(), addresses.end() ), addresses.end() );
+	mCodeRuns.clear();
+	for( u32 a : addresses )
+	{
+		if( !mCodeRuns.empty() && mCodeRuns.back().first + mCodeRuns.back().second * 4 == a )
+			mCodeRuns.back().second++;
+		else
+			mCodeRuns.emplace_back( a, 1 );
+	}
+	mCodeRuns.shrink_to_fit();
+	mCodeHash = HashCodeRuns( mCodeRuns );
+}
+
+bool CFragment::IsCodeUnchanged() const
+{
+	return mCodeHash != kInvalidCodeHash && HashCodeRuns( mCodeRuns ) == mCodeHash;
+}
+
 static void AddCodePage( std::vector< u16 > & pages, u32 address )
 {
 	u32 index = ( address - 0x80000000 ) >> 12;
@@ -207,6 +254,21 @@ CFragment::CFragment( std::shared_ptr<CCodeBufferManager> p_manager,
 	gDeadExitScanRanges.clear();
 	Assemble( p_manager, exit_address, trace, branch_details, register_usage );
 
+	// Remember exactly which instructions were used (see IsCodeUnchanged)
+	{
+		std::vector< u32 > words;
+		words.reserve( trace.size() * 2 + gDeadExitScanRanges.size() );
+		for( const STraceEntry & e : trace )
+		{
+			words.push_back( e.Address );
+			words.push_back( e.Address + 4 );	// a branch delay slot compiled into an exit
+		}
+		for( const auto & r : gDeadExitScanRanges )
+			for( u32 a = r.first; a < r.first + r.second; a += 4 )
+				words.push_back( a );
+		SetCodeWords( words );
+	}
+
 	// Code at exit targets that the code generator read to leave out dead
 	// register stores (CCodeGeneratorPSP::DropDeadExitRegisters): if it
 	// changes, this fragment is stale too
@@ -244,6 +306,12 @@ CFragment::CFragment(std::shared_ptr<CCodeBufferManager> p_manager, u32 entry_ad
 	mIsDead = false;
 	AddCodeRange( mCodePages, entry_address, mInputLength );
 	FinishCodePages( mCodePages );
+	{
+		std::vector< u32 > words;
+		for( u32 i = 0; i < function_length; ++i )
+			words.push_back( entry_address + i * 4 );
+		SetCodeWords( words );
+	}
 
 	Assemble(p_manager, CCodeLabel(function_Ptr));
 }

@@ -94,6 +94,7 @@ namespace PerfLog
 		kStatTraceAborted,
 		kStatFragmentCreated,
 		kStatAudioUnderrun,
+		kStatVerifyICache,		// cache index invalidations handled by comparing compiled code with memory
 		kStatInvalChecks,		// osInvalICache calls that did not flush and were verified
 		kStatStaleOps,			// compiled instructions that no longer match memory after such a call (must be 0)
 		kStatPartialInvalidate,	// a write overlapped compiled code and only the affected fragments were dropped

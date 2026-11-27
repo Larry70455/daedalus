@@ -105,7 +105,11 @@ public:
 
 	// Remember a write over compiled code (see DAEDALUS_SELECTIVE_INVALIDATE)
 	void					QueueInvalidation( u32 address, u32 length );
-	bool					HasPendingInvalidations() const			{ return !mPendingInvalidations.empty(); }
+	bool					HasPendingInvalidations() const			{ return !mPendingInvalidations.empty() || mVerifyAll; }
+	// Instead of dropping all compiled code (cache index invalidation, which
+	// says nothing about what changed): at the next safe point, drop only the
+	// fragments whose N64 code differs from memory (CFragment::IsCodeUnchanged)
+	void					QueueVerifyAll()						{ mVerifyAll = true; }
 	// Drop the fragments the queued writes made stale. Must not be called
 	// while a fragment is running or a trace is being recorded. Adds the
 	// entry addresses of the dropped fragments to dropped_entries and the
@@ -162,6 +166,7 @@ private:
 
 	std::vector< CFragment * >					mDeadFragments;
 	std::vector< std::pair< u32, u32 > >		mPendingInvalidations;
+	bool										mVerifyAll = false;
 	std::array< u16, ((8*1024*1024) >> 12) >		mPageRefs;	// live fragments using each 4 KB page
 #else
 	using JumpList = std::vector< CJumpLocation >;

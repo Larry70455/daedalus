@@ -311,6 +311,7 @@ static void WriteInterpretedHot()
 	fprintf( fh, "# %llu interpreted ops recorded, %u distinct addresses\n", (unsigned long long)total, (u32)all.size() );
 	fprintf( fh, "# dynarec events: cache flushes: cache instruction %u, write over compiled code %u, too many fragments %u, hot trace table full %u\n",
 			 gStats[ kStatFlushICache ], gStats[ kStatFlushOverlap ], gStats[ kStatFlushSize ], gStats[ kStatFlushHotMap ] );
+	fprintf( fh, "# dynarec events: cache index invalidations checked against memory instead of flushing all code: %u\n", gStats[ kStatVerifyICache ] );
 	fprintf( fh, "# dynarec events: traces started %u, aborted %u, fragments compiled %u\n",
 			 gStats[ kStatTraceStarted ], gStats[ kStatTraceAborted ], gStats[ kStatFragmentCreated ] );
 	fprintf( fh, "# dynarec events: writes over compiled code handled by dropping only the affected fragments %u (%u fragments dropped)\n",

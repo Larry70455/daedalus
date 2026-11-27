@@ -105,6 +105,9 @@ public:
 		// fragments that a write to code memory makes stale.
 		const std::vector< u16 > &	GetCodePages() const		{ return mCodePages; }
 		bool		IsPatchFragment() const						{ return mIsPatchFragment; }
+		// False if any N64 instruction this fragment was compiled from (or
+		// read while compiling) differs from memory now, or cannot be read
+		bool		IsCodeUnchanged() const;
 		bool		IsDead() const								{ return mIsDead; }
 		void		SetDead()									{ mIsDead = true; }
 		std::vector< SFragmentLink > &	GetIncomingLinks()		{ return mIncomingLinks; }
@@ -143,6 +146,9 @@ private:
 		CIndirectExitMap *				mpIndirectExitMap;
 
 		std::vector< u16 >				mCodePages;
+		std::vector< std::pair< u32, u32 > >	mCodeRuns;	// (address, words) of the N64 code used, see IsCodeUnchanged
+		u32								mCodeHash;
+		void		SetCodeWords( std::vector< u32 > & addresses );
 		std::vector< SFragmentLink >	mIncomingLinks;		// jumps from other fragments patched to enter this one
 		bool							mIsPatchFragment;
 		bool							mIsDead;			// removed from the cache, kept alive until the next Clear

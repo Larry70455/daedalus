@@ -409,22 +409,32 @@ bool CFragmentCache::ProcessPendingInvalidations( std::vector< u32 > & dropped_e
 	}
 	ranges.insert( ranges.end(), mPendingInvalidations.begin(), mPendingInvalidations.end() );
 	mPendingInvalidations.clear();
+	const bool verify_all = mVerifyAll;
+	mVerifyAll = false;
 
-	// Fragments compiled from any of those pages
+	// Fragments compiled from any of those pages, and (verify_all) fragments
+	// whose code changed
 	std::vector< CFragment * > victims;
 	for( const SFragmentEntry & e : mFragments )
 	{
+		bool stale = false;
 		for( u16 page : e.Fragment->GetCodePages() )
 		{
 			if( written[ page ] )
 			{
-				if( e.Fragment->IsPatchFragment() )
-				{
-					return false;	// keep the old behaviour for OS patches: full Clear
-				}
-				victims.push_back( e.Fragment );
+				stale = true;
 				break;
 			}
+		}
+		if( !stale && verify_all && !e.Fragment->IsCodeUnchanged() )
+			stale = true;
+		if( stale )
+		{
+			if( e.Fragment->IsPatchFragment() )
+			{
+				return false;	// keep the old behaviour for OS patches: full Clear
+			}
+			victims.push_back( e.Fragment );
 		}
 	}
 	if( victims.empty() )

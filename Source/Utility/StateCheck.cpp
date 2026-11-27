@@ -57,6 +57,7 @@ static bool		gHashRam = true;
 static FILE *	gExcLog = nullptr;	// exclog=1: statecheck_exc.txt, one line per exception (vi, count, epc, cause, mi_intr)	// ramhash=0 in statecheck.txt turns the RAM checksum off (for timing runs)
 static u32		gLoadAt = 0;	// loadat=N: load the savestate through the in game path (CPU_RequestLoadState) at vertical blank N instead of before starting
 static std::string	gSaveStatePath;
+static u32		gVerifyEvery = 0;		// verifyevery=N: check all compiled code against memory every N vertical blanks
 static u32		gSaveAt = 0;			// saveat=N:path: write a savestate at vertical blank N
 static std::string	gSaveAtPath;
 struct SPress { u32 Start; u32 Length; u32 Buttons; };	// bits 16-23 / 24-31: analog stick x / y (signed), 0 = centre
@@ -130,6 +131,7 @@ bool StateCheck_Start()
 		else if( key == "patches" )		gPatchesOverride = std::atoi( value.c_str() );
 		else if( key == "memopt" )		gMemOptOverride = std::atoi( value.c_str() );
 		else if( key == "bit32" )		gBit32Override = std::atoi( value.c_str() );
+		else if( key == "verifyevery" )	gVerifyEvery = (u32)std::strtoul( value.c_str(), nullptr, 10 );
 		else if( key == "audio" )		gAudioOverride = std::atoi( value.c_str() );
 		else if( key == "loadat" )		gLoadAt = (u32)std::strtoul( value.c_str(), nullptr, 10 );
 		else if( key == "ramdump" )	gRamDumpFrame = (u32)std::strtoul( value.c_str(), nullptr, 10 );
@@ -239,6 +241,11 @@ void StateCheck_OnVerticalBlank()
 		if( fp ) { fwrite( g_pu8RamBase, 1, gRamSize, fp ); fclose( fp ); }
 	}
 	gFrame++;
+	if( gVerifyEvery != 0 && ( gFrame % gVerifyEvery ) == 0 )
+	{
+		extern void CPU_RequestCodeVerify();
+		CPU_RequestCodeVerify();	// stress test of the code check (see CPU_InvalidateICacheIndexed)
+	}
 	if( gLoadAt != 0 && gFrame == gLoadAt && !gSaveStatePath.empty() )
 		printf( "StateCheck: in game load of %s: %d\n", gSaveStatePath.c_str(), (int)CPU_RequestLoadState( setBasePath( gSaveStatePath ) ) );
 	if( gSaveAt != 0 && gFrame == gSaveAt )
