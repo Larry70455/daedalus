@@ -189,7 +189,7 @@ bool CFragment::IsCodeUnchanged() const
 static void AddCodePage( std::vector< u16 > & pages, u32 address )
 {
 	u32 index = ( address - 0x80000000 ) >> 12;
-	if( index < kNumCodePages )
+	if( index < kNumCodePages && ( pages.empty() || pages.back() != index ) )	// most neighbours share a page; FinishCodePages removes the rest
 	{
 		pages.push_back( u16( index ) );
 	}
@@ -201,6 +201,8 @@ static void AddCodeRange( std::vector< u16 > & pages, u32 address, u32 length )
 	u32 last = ( address + length - 0x80000000 ) >> 12;
 	for( u32 i = first; i <= last && i < kNumCodePages; ++i )
 	{
+		if( !pages.empty() && pages.back() == i )
+			continue;
 		pages.push_back( u16( i ) );
 	}
 }
@@ -260,7 +262,10 @@ CFragment::CFragment( std::shared_ptr<CCodeBufferManager> p_manager,
 		words.reserve( trace.size() * 2 + gDeadExitScanRanges.size() );
 		for( const STraceEntry & e : trace )
 		{
-			words.push_back( e.Address );
+			// Straight code repeats each address (as the next delay slot word);
+			// skip those here, SetCodeWords removes any other duplicates
+			if( words.empty() || words.back() != e.Address )
+				words.push_back( e.Address );
 			words.push_back( e.Address + 4 );	// a branch delay slot compiled into an exit
 		}
 		for( const auto & r : gDeadExitScanRanges )

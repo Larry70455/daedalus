@@ -1449,6 +1449,20 @@ static bool N64FetchForScan( u32 pc, u32 * p_word )
 	if( m.pRead == nullptr )
 		return false;
 	*p_word = *reinterpret_cast< const u32 * >( m.pRead + pc );
+	// Merge with the last range when this word continues it or is already
+	// in it (scans read mostly straight runs, and several exits rescan the
+	// same code), so the lists sorted when the fragment is finished stay short
+	if( !gDeadExitScanRanges.empty() )
+	{
+		auto & last = gDeadExitScanRanges.back();
+		if( pc == last.first + last.second )
+		{
+			last.second += 4;
+			return true;
+		}
+		if( pc >= last.first && pc < last.first + last.second )
+			return true;
+	}
 	gDeadExitScanRanges.emplace_back( pc, 4 );
 	return true;
 }
