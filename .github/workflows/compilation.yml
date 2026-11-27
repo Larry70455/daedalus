@@ -1,183 +1,103 @@
-name: CI
+name: PSP slide disassembly
 
 on:
   push:
+    branches: [codex/psp-slide-disassembly]
   pull_request:
-  repository_dispatch:
-    types: [run_build]
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
-  build-psp:
-    name: PSP Build
-    runs-on: ubuntu-latest
-    container: pspdev/pspdev:latest
-    
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Install dependencies
-      run: |
-        apk add build-base git bash cmake 
-    
-    - name: Compile project
-      run: |
-        ./build_daedalus.sh PSP
-
-    - name: Get short SHA
-      id: slug
-      run: echo "{name}={sha8::$(echo ${GITHUB_S9A} | cut -c1-8)}" >> $GITHUB_OUTPUT
-
-    - name: Prepare Artifacts
-      run: |
-        rm -rf DaedalusX64/daedalus.prx # Remove the PRX used for testing in public builds
-
-    - name: Upload artifacts
-      if: ${{ success() }}
-      uses: actions/upload-artifact@v4
-      with:
-        name: DaedalusX64-PSP
-        path: DaedalusX64
-
-    - name: Extract tag name
-      if: startsWith(github.ref, 'refs/tags/')
-      id: tag
-      run: echo "{name}={VERSION::${GITHUB_REF/refs\/tags\//}}" >> $GITHUB_OUTPUT
-
-
-  build-linux-amd64:
+  disassemble:
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
-    - uses: actions/checkout@v4
-
-    - name: Install dependencies
-      run: |
-        sudo apt update
-        sudo apt install build-essential git bash cmake libpng-dev libz-dev libminizip-dev libsdl2-dev libsdl2-ttf-dev libglew-dev libglm-dev
-    
-    - name: Compile project
-      run: |
-        ./build_daedalus.sh
-
-    - name: Get short SHA
-      id: slug
-      run: echo "{name}={sha8::$(echo ${GITHUB_SHA} | cut -c1-8)}" >> $GITHUB_OUTPUT
-
-    - name: Prepare artifacts
-      run: |
-        tar -zcvf daedalusX64-linux-amd64.tar.gz DaedalusX64
-
-
-    - name: Upload artifacts
-      if: ${{ success() }}
-      uses: actions/upload-artifact@v4
-      with:
-        name: DaedalusX64-Linux-amd64
-        path: DaedalusX64
-
-  build-linux-arm64:
-    runs-on: ubuntu-24.04-arm
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Install dependencies
-      run: |
-        sudo apt update
-        sudo apt install build-essential git bash cmake libpng-dev libz-dev libminizip-dev libsdl2-dev libsdl2-ttf-dev libglew-dev libfmt-dev libglm-dev
-    
-    - name: Compile project
-      run: |
-        ./build_daedalus.sh
-
-    - name: Get short SHA
-      id: slug
-      run: echo "{name}={sha8::$(echo ${GITHUB_SHA} | cut -c1-8)}" >> $GITHUB_OUTPUT
-
-    - name: Prepare artifacts
-      run: |
-        tar -zcvf daedalusX64-linux-arm64.tar.gz DaedalusX64
-
-    - name: Upload artifacts
-      if: ${{ success() }}
-      uses: actions/upload-artifact@v4
-      with:
-        name: DaedalusX64-Linux-arm64
-        path: DaedalusX64
-
-
-  build-ctr:
-    runs-on: ubuntu-24.04
-    container: wally4000/daedalusx64:latest
-
-    steps:
-      - uses: actions/checkout@v4 
-
-      - name: Compile project
-        run: | 
-          ./build_daedalus.sh CTR
-
-      - name: Get short SHA
-        id: slug
-        run: echo "{name}={sha8::$(echo ${GITHUB_SHA} | cut -c1-8)}" >> $GITHUB_OUTPUT
-
-      - name: Prepare artifacts
+      - name: Install analysis tools
         run: |
-          tar -zcvf daedalusX64-CTR.tar.gz DaedalusX64\
-
-      - name: Upload artifacts
-        if: ${{ success() }}
+          sudo apt-get update -qq
+          sudo apt-get install -y build-essential autoconf automake libtool git unzip binutils
+      - name: Build PSP Allegrex PRXTool
+        run: |
+          git clone --depth 1 https://github.com/pspdev/prxtool.git "$RUNNER_TEMP/prxtool"
+          cd "$RUNNER_TEMP/prxtool"
+          ./bootstrap
+          ./configure CXXFLAGS="-O2 -std=gnu++11"
+          make -j2
+          git rev-parse HEAD > "$RUNNER_TEMP/prxtool-commit.txt"
+      - name: Download and verify source modules
+        run: |
+          mkdir -p "$RUNNER_TEMP/slide-input" "$GITHUB_WORKSPACE/slide-analysis"
+          curl --fail --location --retry 3 --max-time 120 \
+            https://github.com/NightStar3/zerovsh-patcher/releases/download/0.4/ZeroVSH_Patcher_v0.4.BIN.zip \
+            -o "$RUNNER_TEMP/zerovsh.zip"
+          python3 - <<'PY'
+          import os, zipfile, hashlib, json
+          from pathlib import Path
+          root = Path(os.environ["RUNNER_TEMP"])
+          out = Path(os.environ["GITHUB_WORKSPACE"]) / "slide-analysis"
+          expected = {
+              "slide_plugin_660.prx": "8cae94bf24e351c8d3e36959c0e95200c109040f55e9ab5586b243236994a10c",
+              "slide_plugin_660.rco": "b8b2ca01e519799a6ce17bd40ea30e22a1eca3c68e91f64afac178dc9d8b57e8",
+          }
+          manifest = {"source": "NightStar3/zerovsh-patcher release 0.4", "firmware_note": "6.60-labeled modules bundled with a release supporting 6.61. Not verified as an exact 6.61 firmware dump.", "files": []}
+          with zipfile.ZipFile(root / "zerovsh.zip") as z:
+              for name, sha in expected.items():
+                  matches = [n for n in z.namelist() if n.endswith("/" + name)]
+                  assert len(matches) == 1, matches
+                  data = z.read(matches[0])
+                  assert hashlib.sha256(data).hexdigest() == sha, name
+                  if name.endswith(".prx"):
+                      assert data[:4] == b"\x7fELF"
+                  (root / "slide-input" / name).write_bytes(data)
+                  manifest["files"].append({"name": name, "bytes": len(data), "sha256": sha})
+          manifest["prxtool_commit"] = (root / "prxtool-commit.txt").read_text().strip()
+          (out / "provenance.json").write_text(json.dumps(manifest, indent=2) + "\n")
+          PY
+      - name: Disassemble and inspect
+        run: |
+          input="$RUNNER_TEMP/slide-input/slide_plugin_660.prx"
+          output="$GITHUB_WORKSPACE/slide-analysis"
+          tool="$RUNNER_TEMP/prxtool/prxtool"
+          readelf -h -l -S "$input" > "$output/elf-layout.txt"
+          "$tool" -m "$input" > "$output/module-info.txt" 2> "$output/module-info.log"
+          "$tool" -f "$input" > "$output/imports-exports.txt" 2> "$output/imports-exports.log"
+          "$tool" -w -o "$output/slide_plugin_660.asm" "$input" 2> "$output/disassembly.log"
+          "$tool" -x -o "$output/module.xml" "$input" 2> "$output/xml.log"
+          strings -a -t x "$input" > "$output/strings.txt"
+          strings -a -t x "$RUNNER_TEMP/slide-input/slide_plugin_660.rco" > "$output/rco-strings.txt"
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, re
+          out = Path(os.environ["GITHUB_WORKSPACE"]) / "slide-analysis"
+          asm = (out / "slide_plugin_660.asm").read_text(errors="replace")
+          assert len(asm) > 1000, "Disassembly unexpectedly empty"
+          lines = asm.splitlines()
+          candidates = []
+          for i, line in enumerate(lines):
+              if re.search(r"0x0*100\b|0x0*200\b|sceCtrl|slide|clock|paf", line, re.I):
+                  candidates.append("\n".join(lines[max(0,i-4):i+6]))
+          (out / "input-candidates.txt").write_text(
+              "Unverified search candidates. 0x100/0x200 are L/R masks, but occurrences alone do not establish input handling.\n\n"
+              + "\n\n".join(candidates[:250]) + "\n")
+          (out / "README.txt").write_text(
+              "PSP slide module disassembly\n"
+              "Source PRX is labeled 6.60; source release supports 6.61. No hardware verification.\n"
+              "Assembly is produced by pspdev/prxtool with its PSP/Allegrex disassembler.\n"
+              "This is disassembly, not recovered original C source.\n"
+              "Input candidates are heuristic and require manual tracing.\n"
+              "No original Sony binaries are included in this artifact.\n")
+          print("ASSEMBLY_LINES", len(lines))
+          print("MODULE INFO\n", (out / "module-info.txt").read_text(errors="replace")[:10000])
+          print("IMPORTS / EXPORTS\n", (out / "imports-exports.txt").read_text(errors="replace")[:20000])
+          PY
+      - name: Upload analysis
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: DaedalusX64-CTR
-          path: DaedalusX64
-
-  build-macos:
-    runs-on: macOS-latest
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Setup Homebrew # This will install the correct homebrew for architecture selected
-      run: |
-        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-    - name: Install dependencies
-      run: |
-        brew install git bash cmake libpng minizip sdl2 sdl2_ttf glew glm
-    
-    - name: Compile project
-      run: |
-        ./build_daedalus.sh
-
-    - name: Get short SHA
-      id: slug
-      run: echo "{name}={sha8::$(echo ${GITHUB_SHA} | cut -c1-8)}" >> $GITHUB_OUTPUT
-
-    - name: Prepare artifacts
-      run: |
-          tar -zcvf daedalusX64-macos-x86.tar.gz DaedalusX64
-
-    - name: Upload artifacts
-      if: ${{ success() }}
-      uses: actions/upload-artifact@v4
-      with:
-        name: DaedalusX64-macos
-        path: DaedalusX64
-
-  build-windows:
-    # runs-on: windows-latest
-    runs-on: ubuntu-24.04
-    container: wally4000/daedalus-win:latest
-
-    env:
-      VCPKG_DEFAULT_TRIPLET: x64-windows
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Build
-        run: |
-          ./build_daedalus.sh WIN
-
-      - name: Upload artifacts
-        if: ${{ success() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: DaedalusX64-Win
-          path: DaedalusX64
+          name: PSP-slide-disassembly
+          path: slide-analysis/
+          if-no-files-found: error
+          retention-days: 90
