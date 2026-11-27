@@ -259,15 +259,31 @@ static u32 GetUYVY(s16 y1, s16 y2, s16 u, s16 v)
         |  (u32)clamp_u8(y2);
 }
 
+// The PSP CPU has no double precision unit, so the double constants below
+// used to turn every pixel into many slow software maths calls (this decode
+// caused 80-137 ms lag spikes in Pokemon Stadium 2 transitions). Single
+// precision gives the same 5 bit colour almost always (34 differences in
+// about 117 million tested inputs, each one step of the lowest colour bit).
+// Set to 0 to use the old double maths.
+#ifndef DAEDALUS_JPEG_FLOAT
+#define DAEDALUS_JPEG_FLOAT 1
+#endif
+
+#if DAEDALUS_JPEG_FLOAT
+#define JPEG_K(x) x##f
+#else
+#define JPEG_K(x) x
+#endif
+
 static u16 GetRGBA(s16 y, s16 u, s16 v)
 {
     const float fY = (float)y + 2048.0f;
     const float fU = (float)u;
     const float fV = (float)v;
 
-    const u16 r = clamp_RGBA_component((s16)(fY             + 1.4025*fV));
-    const u16 g = clamp_RGBA_component((s16)(fY - 0.3443*fU - 0.7144*fV));
-    const u16 b = clamp_RGBA_component((s16)(fY + 1.7729*fU            ));
+    const u16 r = clamp_RGBA_component((s16)(fY                     + JPEG_K(1.4025)*fV));
+    const u16 g = clamp_RGBA_component((s16)(fY - JPEG_K(0.3443)*fU - JPEG_K(0.7144)*fV));
+    const u16 b = clamp_RGBA_component((s16)(fY + JPEG_K(1.7729)*fU                    ));
 
     return (r << 4) | (g >> 1) | (b >> 6) | 1;
 }
