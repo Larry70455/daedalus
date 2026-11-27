@@ -267,6 +267,7 @@ namespace
 				case ORANGE:	return "Orange";
 				case PURPLE:	return "Purple";
 				case GREY:		return "Grey";
+				case VITA:		return "Vita";
 			}
 				#ifdef DAEDALUS_DEBUG_CONSOLE
 			DAEDALUS_ERROR( "Unknown Color" );

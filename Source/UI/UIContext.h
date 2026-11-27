@@ -54,6 +54,8 @@ class CUIContext
 				//void				ClearBackground()		{ ClearBackground( c32::Black ); }
 		virtual void				ClearBackground( c32 colour ) = 0;
 		virtual void				DrawRect( s32 x, s32 y, u32 w, u32 h, c32 colour ) = 0;
+		// Rounded corners where supported (the PSP's Vita theme), a plain rectangle elsewhere
+		virtual void				DrawRoundRect( s32 x, s32 y, u32 w, u32 h, u32 radius [[maybe_unused]], c32 colour )	{ DrawRect( x, y, w, h, colour ); }
 		virtual void				DrawLine( s32 x0, s32 y0, s32 x1, s32 y1, c32 colour ) = 0;
 
 		// ToDo : Move this out of here..
@@ -72,6 +74,7 @@ class CUIContext
 			case ORANGE:	BACKGROUND_COLOUR = c32::Orange;	break;
 			case PURPLE:	BACKGROUND_COLOUR = c32::Purple;	break;
 			case GREY:		BACKGROUND_COLOUR = c32::Grey;		break;
+			case VITA:		BACKGROUND_COLOUR = c32::Black;		break;	// the PSP context draws the Vita backdrop
 			}
 			ClearBackground( BACKGROUND_COLOUR );
 		}

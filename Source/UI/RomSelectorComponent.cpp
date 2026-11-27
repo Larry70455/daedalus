@@ -348,8 +348,17 @@ void IRomSelectorComponent::RenderPreview()
 	}
 	else
 	{
-		mpContext->DrawRect( PREVIEW_IMAGE_LEFT, BELOW_MENU_MIN, PREVIEW_IMAGE_WIDTH, PREVIEW_IMAGE_HEIGHT, c32::White );
-		mpContext->DrawRect( PREVIEW_IMAGE_LEFT+2, BELOW_MENU_MIN+2, PREVIEW_IMAGE_WIDTH-4, PREVIEW_IMAGE_HEIGHT-4, c32::Black );
+		if( gGlobalPreferences.GuiColor == VITA )
+		{
+			// Rounded translucent panel with a faint edge
+			mpContext->DrawRoundRect( PREVIEW_IMAGE_LEFT, BELOW_MENU_MIN, PREVIEW_IMAGE_WIDTH, PREVIEW_IMAGE_HEIGHT, 10, c32( 0xc8, 0xe8, 0xff, 0x40 ) );
+			mpContext->DrawRoundRect( PREVIEW_IMAGE_LEFT+1, BELOW_MENU_MIN+1, PREVIEW_IMAGE_WIDTH-2, PREVIEW_IMAGE_HEIGHT-2, 9, c32( 0x00, 0x0c, 0x1c, 0xb0 ) );
+		}
+		else
+		{
+			mpContext->DrawRect( PREVIEW_IMAGE_LEFT, BELOW_MENU_MIN, PREVIEW_IMAGE_WIDTH, PREVIEW_IMAGE_HEIGHT, c32::White );
+			mpContext->DrawRect( PREVIEW_IMAGE_LEFT+2, BELOW_MENU_MIN+2, PREVIEW_IMAGE_WIDTH-4, PREVIEW_IMAGE_HEIGHT-4, c32::Black );
+		}
 		mpContext->DrawTextAlign( PREVIEW_IMAGE_LEFT, PREVIEW_IMAGE_LEFT + PREVIEW_IMAGE_WIDTH, AT_CENTRE, BELOW_MENU_MIN+PREVIEW_IMAGE_HEIGHT/2, "No Preview Available", c32::White );
 	}
 
@@ -510,6 +519,12 @@ void IRomSelectorComponent::Render()
 	c32 color;
 	if(count & 0x80) color = c32( ~count<<1, 0, 0, 255);
 	else color = c32( count<<1, 0, 0, 255);
+	if( gGlobalPreferences.GuiColor == VITA )
+	{
+		// Light blue pulse: dark red disappears on the Vita backdrop
+		const u32 v = color.GetR();
+		color = c32( 0x70 + ( v >> 1 ), 0xb8 + ( v >> 2 ), 0xff, 0xff );
+	}
 
 	if(mRomDelete)
 	{

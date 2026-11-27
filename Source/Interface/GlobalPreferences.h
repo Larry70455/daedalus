@@ -33,8 +33,9 @@ enum EGuiColor
 	ORANGE,
 	PURPLE,
 	GREY,
+	VITA,		// PS Vita style menus: gradient with light ribbons, highlight pills (PSP)
 };
-const u32 NUM_COLOR_TYPES = GREY+1;
+const u32 NUM_COLOR_TYPES = VITA+1;
 
 
 enum EViewportType
