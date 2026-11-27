@@ -126,6 +126,7 @@ else()
 		option(DAEDALUS_ENABLE_DYNAREC "Enable Dynamic Recompilation, Disable if system not supported" ON)
 		option(DAEDALUS_PSP "PSP specific Options" ON)
 		option(DAEDALUS_PSP_USE_ME "Use the Media Engine" ON)
+		option(DAEDALUS_ME_GRAPHICS "Test: display lists parsed on the Media Engine (option in Advanced Options)" OFF)
 		option(DAEDALUS_PSP_USE_VFPU "Enable VFPU Instructions" ON)
 		option(DAEDALUS_SIM_DOUBLES "Simulate Doubles" ON)
 		option(INTRAFONT "Use Native Fonts" ON) #If this is off, SDL will be enabled

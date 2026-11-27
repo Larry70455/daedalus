@@ -256,6 +256,10 @@ bool IPreferences::OpenPreferencesFile( const std::filesystem::path  &filename )
 		{
             preferences.AudioRateMatch = property->GetBooleanValue( false );
 		}
+		if( section->FindProperty( "MEGraphics", &property ) )
+		{
+			preferences.MEGraphics = property->GetBooleanValue( true );
+		}
 		if( section->FindProperty( "VideoRateMatch", &property ) )
 		{
             preferences.VideoRateMatch = property->GetBooleanValue( false );
@@ -336,6 +340,7 @@ fh << "DoubleDisplayEnabled=" << preferences.DoubleDisplayEnabled << "\n";
 fh << "CleanSceneEnabled=" << preferences.CleanSceneEnabled << "\n";
 fh << "ClearDepthFrameBuffer=" << preferences.ClearDepthFrameBuffer << "\n";
 fh << "AudioRateMatch=" << preferences.AudioRateMatch << "\n";
+fh << "MEGraphics=" << preferences.MEGraphics << "\n";
 fh << "VideoRateMatch=" << preferences.VideoRateMatch << "\n";
 fh << "FogEnabled=" << preferences.FogEnabled << "\n";
 fh << "CheckTextureHashFrequency=" << GetTexureHashFrequencyAsFrames(preferences.CheckTextureHashFrequency) << "\n";
@@ -460,6 +465,7 @@ SRomPreferences::SRomPreferences()
 	,	CleanSceneEnabled( false )
 	,	ClearDepthFrameBuffer( false )
 	,	AudioRateMatch( false )
+	,	MEGraphics( true )
 	,	VideoRateMatch( false )
 	,	FogEnabled( false )
 	,   MemoryAccessOptimisation( true )
@@ -485,6 +491,7 @@ void SRomPreferences::Reset()
 	CleanSceneEnabled          = false;
 	ClearDepthFrameBuffer	   = false;
 	AudioRateMatch             = false;
+	MEGraphics                 = true;
 	VideoRateMatch             = false;
 	FogEnabled                 = false;
 	MemoryAccessOptimisation   = true;
@@ -509,6 +516,7 @@ void SRomPreferences::Apply() const
 	gCleanSceneEnabled          = g_ROM.settings.CleanSceneEnabled || CleanSceneEnabled;
 	gClearDepthFrameBuffer      = g_ROM.settings.ClearDepthFrameBuffer || ClearDepthFrameBuffer;
 	gAudioRateMatch             = g_ROM.settings.AudioRateMatch || AudioRateMatch;
+	gMEGraphicsEnabled          = MEGraphics;
 	gVideoRateMatch             = g_ROM.settings.VideoRateMatch || VideoRateMatch;
 	gFogEnabled                 = g_ROM.settings.FogEnabled || FogEnabled;
 	gCheckTextureHashFrequency  = GetTexureHashFrequencyAsFrames( CheckTextureHashFrequency );

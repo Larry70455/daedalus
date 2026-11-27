@@ -603,8 +603,8 @@ static int DLParser_FrontEndJob( int instruction_limit )
 
 static bool DLParser_MEKick( u32 instruction_limit )
 {
-	if( !gDoubleDisplayEnabled || gGfxStreamOff )
-		return false;
+	if( !gDoubleDisplayEnabled || !gMEGraphicsEnabled || gGfxStreamOff )
+		return false;		// recorded and drawn on the main CPU instead
 	if( !gLoadedMediaEnginePRX && !InitialiseMediaEngine() )
 		return false;
 	MEAudio_WaitForJob();		// one Media Engine job at a time

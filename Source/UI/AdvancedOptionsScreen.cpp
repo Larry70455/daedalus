@@ -96,6 +96,9 @@ IAdvancedOptionsScreen::IAdvancedOptionsScreen( CUIContext * p_context, const Ro
 	mElements.Add( std::make_unique<CBoolSetting>( &mRomPreferences.CleanSceneEnabled, "Clean Scene", "Force clear of frame buffer before drawing any primitives (Use it to clear out garbage on screen)", "Enabled", "Disabled" ) );
 	mElements.Add( std::make_unique<CBoolSetting>( &mRomPreferences.ClearDepthFrameBuffer, "Clear N64 Depth Buffer", "Z-buffer clears for special effects like sun/flames glare in Zelda and camera in DK64 (WARNING, don't use it unless needed)", "Enabled", "Disabled" ) );
 	mElements.Add( std::make_unique<CBoolSetting>( &mRomPreferences.DoubleDisplayEnabled, "Double Display Lists", "Double Display Lists enabled for a speed-up (works on most ROMs)", "Enabled", "Disabled" ) );
+#if defined(DAEDALUS_ME_GRAPHICS) && DAEDALUS_ME_GRAPHICS
+	mElements.Add( std::make_unique<CBoolSetting>( &mRomPreferences.MEGraphics, "Graphics on Media Engine", "Test: the second CPU reads the game's display lists while the main CPU carries on (needs Double Display Lists).", "Enabled", "Disabled" ) );
+#endif
 	mElements.Add( std::make_unique<CBoolSetting>( &mRomPreferences.VideoRateMatch, "Video Rate Match", "Match video rate to the frame rate (makes some games less sluggish Rayman2/Donald Duck/Tom and Jerry/Earth Worm Jim)", "Yes", "No" ) );
 	mElements.Add( std::make_unique<CBoolSetting>( &mRomPreferences.AudioRateMatch, "Audio Rate Match", "Match audio rate to the frame rate (less pops and clicks)", "Yes", "No" ) );
 	mElements.Add( std::make_unique<CBoolSetting>( &mRomPreferences.FogEnabled, "Fog Emulation", "Enable or disable distance fog (works on many ROMs but the extra rendering pass uses more resources)", "Enabled", "Disabled" ) );

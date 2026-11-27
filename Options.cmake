@@ -86,6 +86,11 @@ if(DAEDALUS_PSP_USE_ME)
     add_compile_definitions(DAEDALUS_PSP_USE_ME)
 endif(DAEDALUS_PSP_USE_ME)
 
+if(DAEDALUS_ME_GRAPHICS)
+    message("DAEDALUS_ME_GRAPHICS=ON")
+    add_compile_definitions(DAEDALUS_GFX_STREAM=1 DAEDALUS_ME_GRAPHICS=1)
+endif()
+
 if(DAEDALUS_PSP_USE_VFPU)
     message("DAEDALUS_PSP_USE_VFPU=ON")
     add_compile_definitions(DAEDALUS_PSP_USE_VFPU)

@@ -84,6 +84,7 @@ struct SRomPreferences
 	bool						CleanSceneEnabled;
 	bool						ClearDepthFrameBuffer;
 	bool						AudioRateMatch;
+	bool						MEGraphics;					// DAEDALUS_ME_GRAPHICS builds: display lists on the Media Engine
 	bool						VideoRateMatch;
 	bool						FogEnabled;
 	bool                        MemoryAccessOptimisation;
