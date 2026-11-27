@@ -42,6 +42,8 @@ public:
 	void				Draw2DWithCombiner( const glm::vec2 * xy, const glm::vec2 * uv, u32 triangle_mode, std::shared_ptr<CNativeTexture> texture );
 	bool				mSpriteStates = false;	// see Draw2DWithCombiner
 	void				SpriteAlphaFromTexture( DaedalusVtx * p_vertices, u32 num_vertices );
+	u8					SpriteCombinerAlpha() const;
+	u8					mSpriteAlpha = 255;	// see SpriteCombinerAlpha
 
 	virtual void		TexRect( u32 tile_idx, const glm::vec2 & xy0, const glm::vec2 & xy1, TexCoord st0, TexCoord st1 );
 	virtual void		TexRectFlip( u32 tile_idx, const glm::vec2 & xy0, const glm::vec2 & xy1, TexCoord st0, TexCoord st1 );
@@ -63,6 +65,7 @@ public:
 	virtual void		SetColorImage( u32 address, u32 width, u32 format, u32 size );
 	virtual void		EndRenderTarget();
 	virtual std::shared_ptr<CNativeTexture>	LookupRenderTarget( const TextureInfo & ti );
+	void				WriteBackFrameIfRead( const TextureInfo & ti );	// see DAEDALUS_FB_WRITEBACK
 
 #if DAEDALUS_GFX_STREAM
 	// Record and replay (see SGfxState in BaseRenderer.h)

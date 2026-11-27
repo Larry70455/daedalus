@@ -50,6 +50,13 @@ extern void InitBlenderMode( u32 blender );
 #ifndef DAEDALUS_S2DEX_COMBINER
 #define DAEDALUS_S2DEX_COMBINER 1
 #endif
+
+// S2DEX sprites take the combiner's alpha where it can be worked out exactly
+// (fades, and sprites the N64 does not show at all), instead of always
+// opaque times the texture alpha (see SpriteCombinerAlpha). 0: as before.
+#ifndef DAEDALUS_SPRITE_ALPHA
+#define DAEDALUS_SPRITE_ALPHA DAEDALUS_S2DEX_COMBINER
+#endif
 SMELine<bool> gDraw2DCombiner_ = { false };	// set by S2DEX_DRAW_SCOPE (Ucode_S2DEX.h); cache lines of its own (MEShared.h)
 #define gDraw2DCombiner	(gDraw2DCombiner_.v)
 bool gGfxStreamOff = false;
@@ -1309,16 +1316,76 @@ void RendererPSP::FillRect( const glm::vec2 & xy0, const glm::vec2 & xy1, u32 co
 
 #if DAEDALUS_S2DEX_COMBINER
 // Sprites keep the texture's transparency (as the old path did): the vertex
-// alpha a blend mode override set (often the primitive alpha, which games
-// leave at 0 for text) goes back to opaque, so texture alpha decides
+// alpha a blend mode override set goes back to mSpriteAlpha (opaque unless
+// SpriteCombinerAlpha worked out the combiner's alpha), so texture alpha
+// times that decides
 void RendererPSP::SpriteAlphaFromTexture( DaedalusVtx * p_vertices, u32 num_vertices )
 {
+	const c32 alpha( u32( mSpriteAlpha ) << 24 );
 	for( u32 i = 0; i < num_vertices; ++i )
-		p_vertices[ i ].Colour.SetBits( c32( 0xff000000 ), c32::MASK_A );
+		p_vertices[ i ].Colour.SetBits( alpha, c32::MASK_A );
 }
+
+#if DAEDALUS_SPRITE_ALPHA
+// A combiner alpha input that is the same for every pixel of a sprite
+// (shade is white for sprites). Returns false for texels and the rest.
+static bool SpriteConstantAlpha( u32 input, bool is_c, c32 prim, c32 env, f32 * value )
+{
+	switch( input )
+	{
+	case 3:	*value = prim.GetA() / 255.0f;	return true;	// primitive
+	case 4:	*value = 1.0f;					return true;	// shade
+	case 5:	*value = env.GetA() / 255.0f;	return true;	// environment
+	case 6:	if( is_c ) return false;		// C: primitive LOD fraction
+			*value = 1.0f;					return true;	// A, B, D: one
+	case 7:	*value = 0.0f;					return true;	// zero
+	default:						return false;
+	}
+}
+
+// The sprite's combiner alpha as a factor of the texture alpha, 0..255, or
+// 255 (as before) when it cannot be worked out exactly. One cycle combiners
+// whose alpha is ( A - B ) * texel alpha with A, B constant, or 0 for every
+// texel, blended as In * AIn + Mem * (1 - A).
+// Yoshi's Story fades its story text with the primitive alpha (Prim - Env)
+// * Texel0 + Env with Env alpha 0, and lays a sprite with primitive and
+// environment alpha 0 over the picture while the page turns into a jar
+// (drawn opaque before: a black rectangle).
+u8 RendererPSP::SpriteCombinerAlpha() const
+{
+	// With alpha_cvg_sel the blender takes coverage, not the combiner alpha
+	if( gRDPOtherMode.cycle_type != CYCLE_1CYCLE || !gRDPOtherMode.force_bl || gRDPOtherMode.alpha_cvg_sel )
+		return 255;
+	const u32 bl = gRDPOtherMode.blender;
+	if( ( ( bl >> 14 ) & 3 ) != 0 || ( ( bl >> 10 ) & 3 ) != 0 || ( ( bl >> 6 ) & 3 ) != 1 || ( ( bl >> 2 ) & 3 ) != 0 )
+		return 255;
+	// Alpha of the first cycle: ( A - B ) * C + D
+	const u32 m0 = u32( mMux >> 32 );
+	const u32 m1 = u32( mMux );
+	const u32 sel_c = ( m0 >> 9 ) & 7;
+	f32 a, b, c, d;
+	if( !SpriteConstantAlpha( ( m0 >> 12 ) & 7, false, mPrimitiveColour, mEnvColour, &a ) ||
+		!SpriteConstantAlpha( ( m1 >> 12 ) & 7, false, mPrimitiveColour, mEnvColour, &b ) ||
+		!SpriteConstantAlpha( ( m1 >> 9 ) & 7, false, mPrimitiveColour, mEnvColour, &d ) )
+		return 255;
+	if( SpriteConstantAlpha( sel_c, true, mPrimitiveColour, mEnvColour, &c ) )
+		return ( ( a - b ) * c + d ) < 0.5f / 255.0f ? 0 : 255;		// constant: only "nothing" is exact
+	if( ( sel_c == 1 || sel_c == 2 ) && d == 0.0f )
+	{
+		const f32 k = std::min( std::max( a - b, 0.0f ), 1.0f );	// alpha = k * texel alpha
+		return u8( k * 255.0f + 0.5f );
+	}
+	return std::max( d, a - b + d ) < 0.5f / 255.0f ? 0 : 255;		// C a fraction in 0..1
+}
+#endif
 
 void RendererPSP::Draw2DWithCombiner( const glm::vec2 * xy, const glm::vec2 * uv, u32 triangle_mode, std::shared_ptr<CNativeTexture> texture )
 {
+#if DAEDALUS_SPRITE_ALPHA
+	mSpriteAlpha = SpriteCombinerAlpha();
+	if( mSpriteAlpha == 0 )
+		return;		// the N64 draws nothing
+#endif
 	FlushPendingDraw();
 	DaedalusVtx * p_vertices = AllocVertices( 4 );
 	for( u32 i = 0; i < 4; ++i )
@@ -1326,7 +1393,7 @@ void RendererPSP::Draw2DWithCombiner( const glm::vec2 * xy, const glm::vec2 * uv
 		p_vertices[ i ].Position.x = N64ToScreenX( xy[ i ].x );
 		p_vertices[ i ].Position.y = N64ToScreenY( xy[ i ].y );
 		p_vertices[ i ].Position.z = 0.0f;
-		p_vertices[ i ].Colour = c32( 0xffffffff );	// no shade colour, as in TexRect
+		p_vertices[ i ].Colour = c32( ( u32( mSpriteAlpha ) << 24 ) | 0x00ffffff );	// no shade colour, as in TexRect
 		p_vertices[ i ].Texture.x = uv[ i ].x;
 		p_vertices[ i ].Texture.y = uv[ i ].y;
 	}
@@ -1344,6 +1411,7 @@ void RendererPSP::Draw2DWithCombiner( const glm::vec2 * xy, const glm::vec2 * uv
 	RenderUsingCurrentBlendMode( p_vertices, 4, triangle_mode, GU_TRANSFORM_2D, false );
 
 	mSpriteStates = false;
+	mSpriteAlpha = 255;
 	mBoundTexture[ 0 ] = saved_texture;
 	mTexWrap[ 0 ] = saved_wrap;
 	mTnL.Flags.Fog = saved_fog;
@@ -2155,6 +2223,154 @@ static u32 HashN64Image( u32 address, u32 width )
 	return h;
 }
 
+//*****************************************************************************
+// Frame buffer write back (DAEDALUS_FB_WRITEBACK)
+//
+// Some effects use the picture of the previous frame as a texture: Yoshi's
+// Story turns it like a book page when Yoshi goes down a jar. The N64 has
+// that picture in its memory; here it only exists on the PSP screen, so
+// the page was black. When a texture is loaded from inside the N64 frame
+// buffer drawn by a recent display list, the screen is copied once
+// from the PSP display buffer back into N64 memory (scaled to N64 pixels,
+// 16 bit RGBA), and the normal texture path uses it. Only with double
+// display lists (the GE must have finished that frame: it is waited for).
+//*****************************************************************************
+#ifndef DAEDALUS_FB_WRITEBACK
+#define DAEDALUS_FB_WRITEBACK 1
+#endif
+
+#if DAEDALUS_FB_WRITEBACK
+#include <pspdisplay.h>
+extern u32 uViHeight;
+extern bool gDoubleDisplayEnabled;
+
+namespace
+{
+	struct SFrameImage
+	{
+		u32		Address = 0;
+		u32		Width = 0;
+		u32		LastFrame = 0;		// gRDPFrame of the last display list that drew into it
+		u32		RamHash = 0;		// N64 memory there when it was drawn (see SampleN64Image)
+		bool	WrittenBack = false;
+	};
+
+	// Sampled checksum of an N64 image: the emulator never writes frame
+	// buffers to N64 memory, so if a game uses that memory only for the
+	// picture it stays the same; if the game puts other data there (Pokemon
+	// Stadium 2 keeps textures next to its colour image) it changes, and
+	// that memory must not be overwritten
+	u32 SampleN64Image( u32 address, u32 bytes )
+	{
+		const u32 * p = reinterpret_cast< const u32 * >( g_pu8RamBase + address );
+		const u32 words = bytes / 4;
+		const u32 step = words > 1024 ? words / 1024 : 1;
+		u32 h = 2166136261u;
+		for( u32 i = 0; i < words; i += step )
+			h = ( h ^ p[ i ] ) * 16777619u;
+		return h;
+	}
+	const u32		kNumFrameImages = 4;
+	const u32		kMaxWriteBackAge = 6;	// display lists since that image was drawn
+	SFrameImage		gFrameImages[ kNumFrameImages ];
+	u32				gCurrentColourImage = 0;
+}
+
+// Back end, SetColorImage: remember the N64 frame buffers drawn into
+static void NoteFrameImage( u32 address, u32 width, u32 format, u32 size )
+{
+	gCurrentColourImage = address;
+	if( format != G_IM_FMT_RGBA || size != G_IM_SIZ_16b || width != uViWidth )
+		return;
+	SFrameImage * slot = nullptr;
+	for( u32 i = 0; i < kNumFrameImages; ++i )
+	{
+		if( gFrameImages[ i ].Address == address )
+		{
+			slot = &gFrameImages[ i ];
+			break;
+		}
+		if( slot == nullptr || gFrameImages[ i ].LastFrame < slot->LastFrame )
+			slot = &gFrameImages[ i ];
+	}
+	slot->Address = address;
+	slot->Width = width;
+	slot->LastFrame = gRDPFrame;
+	slot->WrittenBack = false;		// drawn again
+	const u32 bytes = width * uViHeight * 2;
+	slot->RamHash = ( address + bytes <= gRamSize ) ? SampleN64Image( address, bytes ) : 0;
+}
+
+void RendererPSP::WriteBackFrameIfRead( const TextureInfo & ti )
+{
+	if( !gDoubleDisplayEnabled || ti.GetFormat() != G_IM_FMT_RGBA || ti.GetSize() != G_IM_SIZ_16b )
+		return;
+	const u32 address = ti.GetLoadAddress();
+	for( u32 i = 0; i < kNumFrameImages; ++i )
+	{
+		SFrameImage & f = gFrameImages[ i ];
+		const u32 height = uViHeight;
+		if( f.Address == 0 || f.WrittenBack || f.Address == gCurrentColourImage ||
+			address < f.Address || address >= f.Address + f.Width * height * 2 )
+			continue;
+		f.WrittenBack = true;
+		// The PSP screen shows the last frame drawn. Games with three frame
+		// buffers read one drawn a few frames ago (Yoshi's Story: 4), whose
+		// picture is close to the screen's, so recent images use the screen.
+		// Only memory the game left alone since may be overwritten.
+		if( gRDPFrame - f.LastFrame > kMaxWriteBackAge || f.Address + f.Width * height * 2 > gRamSize ||
+			SampleN64Image( f.Address, f.Width * height * 2 ) != f.RamHash )
+			return;
+
+		sceGuSync( 0, 0 );		// that frame's GE list must be done
+		void * buffer;
+		int buffer_width, pixel_format;
+		sceDisplayGetFrameBuf( &buffer, &buffer_width, &pixel_format, 0 );
+		if( buffer == nullptr )
+			return;
+		const u8 * screen = reinterpret_cast< const u8 * >( make_uncached_ptr( buffer ) );
+		const u32 bpp = ( pixel_format == PSP_DISPLAY_PIXEL_FORMAT_8888 ) ? 4 : 2;
+		// The main screen mapping, also while drawing into a small render target
+		const glm::vec2 scale = mActiveRenderTarget ? mSavedN64ToScreenScale : mN64ToScreenScale;
+		const glm::vec2 trans = mActiveRenderTarget ? mSavedN64ToScreenTranslate : mN64ToScreenTranslate;
+		for( u32 y = 0; y < height; ++y )
+		{
+			const s32 sy = s32( ( y + 0.5f ) * scale.y + trans.y );
+			if( sy < 0 || sy >= 272 )
+				continue;
+			for( u32 x = 0; x < f.Width; ++x )
+			{
+				const s32 sx = s32( ( x + 0.5f ) * scale.x + trans.x );
+				if( sx < 0 || sx >= buffer_width )
+					continue;
+				const u8 * p = screen + ( sy * buffer_width + sx ) * bpp;
+				u32 r, g, b;
+				if( bpp == 4 )
+				{
+					r = p[ 0 ] >> 3; g = p[ 1 ] >> 3; b = p[ 2 ] >> 3;
+				}
+				else
+				{
+					const u16 c = p[ 0 ] | ( p[ 1 ] << 8 );
+					if( pixel_format == PSP_DISPLAY_PIXEL_FORMAT_565 )
+					{
+						r = c & 31; g = ( c >> 6 ) & 31; b = ( c >> 11 ) & 31;
+					}
+					else	// 5551
+					{
+						r = c & 31; g = ( c >> 5 ) & 31; b = ( c >> 10 ) & 31;
+					}
+				}
+				// N64 RGBA 5551, in Daedalus' byte swapped RDRAM (halfword ^ 2)
+				const u32 o = ( f.Address + ( y * f.Width + x ) * 2 ) ^ 2;
+				*reinterpret_cast< u16 * >( g_pu8RamBase + o ) = u16( ( r << 11 ) | ( g << 6 ) | ( b << 1 ) | 1 );
+			}
+		}
+		return;
+	}
+}
+#endif
+
 void RendererPSP::CreateRenderTargets()
 {
 	// Reserved once, before textures fill video memory
@@ -2173,6 +2389,9 @@ void RendererPSP::SetColorImage( u32 address, u32 width, u32 format, u32 size )
 		op->Address = address; op->Width = width; op->Format = format; op->Size = size;
 		return;
 	}
+#endif
+#if DAEDALUS_FB_WRITEBACK
+	NoteFrameImage( address, width, format, size );
 #endif
 	++gGuTextureEpoch;	// render to texture writes texture memory
 	EndRenderTarget();
@@ -2254,6 +2473,9 @@ void RendererPSP::EndRenderTarget()
 
 std::shared_ptr<CNativeTexture> RendererPSP::LookupRenderTarget( const TextureInfo & ti )
 {
+#if DAEDALUS_FB_WRITEBACK
+	WriteBackFrameIfRead( ti );
+#endif
 	if( ti.GetFormat() != G_IM_FMT_RGBA || ti.GetSize() != G_IM_SIZ_16b )
 		return nullptr;
 	const u32 address = ti.GetLoadAddress();
