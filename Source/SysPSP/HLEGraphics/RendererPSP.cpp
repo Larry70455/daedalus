@@ -38,6 +38,18 @@ RendererPSP  * gRendererPSP = nullptr;
 
 extern void InitBlenderMode( u32 blender );
 
+// 1: S2DEX sprites and backgrounds (Yoshi's Story is drawn almost only with
+// them) get their colours from the game's colour combiner, like texture
+// rectangles. The old path pasted the texture as is, so sprites coloured by
+// the primitive/environment colours came out wrong: the shadows under the
+// Yoshis on the Select Yoshi screen (black with alpha, drawn from a white
+// mask texture) were bright discs. Edges stay smooth as before (see
+// mSpriteStates). 0: old path.
+#ifndef DAEDALUS_S2DEX_COMBINER
+#define DAEDALUS_S2DEX_COMBINER 1
+#endif
+bool gDraw2DCombiner = false;	// set by S2DEX_DRAW_SCOPE (Ucode_S2DEX.h)
+
 // 1: polygons whose N64 blend result is the framebuffer unchanged only write
 // depth (fixes black polygons in Pokemon Stadium 2's Strength). 0: old code.
 #ifndef DAEDALUS_BLEND_KEEP_FRAMEBUFFER
@@ -544,6 +556,19 @@ void RendererPSP::RenderUsingCurrentBlendMode( DaedalusVtx * p_vertices, u32 num
 		sceGuDisable(GU_ALPHA_TEST);
 	}
 
+#if DAEDALUS_S2DEX_COMBINER
+	if( mSpriteStates )
+	{
+		// S2DEX sprite (Draw2DWithCombiner): colours from the combiner, but
+		// smooth edges and transparency as before (bilinear, no alpha cut
+		// off, alpha blended with the texture's alpha)
+		sceGuTexFilter( GU_LINEAR, GU_LINEAR );
+		sceGuDisable( GU_ALPHA_TEST );
+		sceGuEnable( GU_BLEND );
+		sceGuBlendFunc( GU_ADD, GU_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA, 0, 0 );
+	}
+#endif
+
 	SBlendStateEntry		blend_entry;
 
 	switch ( cycle_mode )
@@ -610,12 +635,20 @@ void RendererPSP::RenderUsingCurrentBlendMode( DaedalusVtx * p_vertices, u32 num
 			DaedalusVtx * p_FogVtx = AllocVertices( num_vertices );
 			memcpy( p_FogVtx, p_vertices, num_vertices * sizeof( DaedalusVtx ) );
 			details.ColourAdjuster.Process( p_vertices, num_vertices );
+#if DAEDALUS_S2DEX_COMBINER
+			if( mSpriteStates )
+				SpriteAlphaFromTexture( p_vertices, num_vertices );
+#endif
 			sceGuDrawArray( triangle_mode, render_flags, num_vertices, nullptr, p_vertices );
 			RenderFog( p_FogVtx, num_vertices, triangle_mode, render_flags );
 		}
 		else
 		{
 			details.ColourAdjuster.Process( p_vertices, num_vertices );
+#if DAEDALUS_S2DEX_COMBINER
+			if( mSpriteStates )
+				SpriteAlphaFromTexture( p_vertices, num_vertices );
+#endif
 			sceGuDrawArray( triangle_mode, render_flags, num_vertices, nullptr, p_vertices );
 		}
 	}
@@ -683,7 +716,9 @@ void RendererPSP::RenderUsingRenderSettings( const CBlendStates * states, Daedal
 		{
 			out.VertexExpressionRGB->ApplyExpressionRGB( state );
 		}
-		if(out.VertexExpressionA != nullptr)
+		// S2DEX sprites (mSpriteStates): transparency from the texture as
+		// before (vertex alpha stays 255), only the colour from the combiner
+		if(out.VertexExpressionA != nullptr && !mSpriteStates)
 		{
 			out.VertexExpressionA->ApplyExpressionAlpha( state );
 		}
@@ -702,7 +737,7 @@ void RendererPSP::RenderUsingRenderSettings( const CBlendStates * states, Daedal
 			case PBM_BLEND:			tfx = GU_TFX_BLEND; sceGuTexEnvColor( out.TextureFactor.GetColour() ); break;
 			}
 
-			sceGuTexFunc( tfx, out.BlendAlphaMode == PBAM_RGB ? GU_TCC_RGB :  GU_TCC_RGBA );
+			sceGuTexFunc( tfx, ( out.BlendAlphaMode == PBAM_RGB && !mSpriteStates ) ? GU_TCC_RGB :  GU_TCC_RGBA );
 
 			if( g_ROM.T1_HACK )
 			{
@@ -1042,9 +1077,61 @@ void RendererPSP::FillRect( const glm::vec2 & xy0, const glm::vec2 & xy1, u32 co
 #endif
 }
 
+#if DAEDALUS_S2DEX_COMBINER
+// Sprites keep the texture's transparency (as the old path did): the vertex
+// alpha a blend mode override set (often the primitive alpha, which games
+// leave at 0 for text) goes back to opaque, so texture alpha decides
+void RendererPSP::SpriteAlphaFromTexture( DaedalusVtx * p_vertices, u32 num_vertices )
+{
+	for( u32 i = 0; i < num_vertices; ++i )
+		p_vertices[ i ].Colour.SetBits( c32( 0xff000000 ), c32::MASK_A );
+}
+
+void RendererPSP::Draw2DWithCombiner( const glm::vec2 * xy, const glm::vec2 * uv, u32 triangle_mode, std::shared_ptr<CNativeTexture> texture )
+{
+	FlushPendingDraw();
+	DaedalusVtx * p_vertices = AllocVertices( 4 );
+	for( u32 i = 0; i < 4; ++i )
+	{
+		p_vertices[ i ].Position.x = N64ToScreenX( xy[ i ].x );
+		p_vertices[ i ].Position.y = N64ToScreenY( xy[ i ].y );
+		p_vertices[ i ].Position.z = 0.0f;
+		p_vertices[ i ].Colour = c32( 0xffffffff );	// no shade colour, as in TexRect
+		p_vertices[ i ].Texture.x = uv[ i ].x;
+		p_vertices[ i ].Texture.y = uv[ i ].y;
+	}
+
+	// Draw with this texture in slot 0, clamped, without fog; put back after
+	const std::shared_ptr<CNativeTexture> saved_texture = mBoundTexture[ 0 ];
+	const TextureWrap saved_wrap = mTexWrap[ 0 ];
+	const u32 saved_fog = mTnL.Flags.Fog;
+	mBoundTexture[ 0 ] = texture;
+	mTexWrap[ 0 ].u = GU_CLAMP;
+	mTexWrap[ 0 ].v = GU_CLAMP;
+	mTnL.Flags.Fog = 0;
+	mSpriteStates = true;
+
+	RenderUsingCurrentBlendMode( p_vertices, 4, triangle_mode, GU_TRANSFORM_2D, false );
+
+	mSpriteStates = false;
+	mBoundTexture[ 0 ] = saved_texture;
+	mTexWrap[ 0 ] = saved_wrap;
+	mTnL.Flags.Fog = saved_fog;
+}
+#endif
+
 void RendererPSP::Draw2DTexture(f32 x0, f32 y0, f32 x1, f32 y1,
 								f32 u0, f32 v0, f32 u1, f32 v1, std::shared_ptr<CNativeTexture> texture)
 {
+#if DAEDALUS_S2DEX_COMBINER
+	if( gDraw2DCombiner && u1 < 512.f && v1 < 512.f )
+	{
+		const glm::vec2 xy[ 4 ] = { glm::vec2( x0, y0 ), glm::vec2( x1, y0 ), glm::vec2( x0, y1 ), glm::vec2( x1, y1 ) };
+		const glm::vec2 uv[ 4 ] = { glm::vec2( u0, v0 ), glm::vec2( u1, v0 ), glm::vec2( u0, v1 ), glm::vec2( u1, v1 ) };
+		Draw2DWithCombiner( xy, uv, GU_TRIANGLE_STRIP, texture );
+		return;
+	}
+#endif
 	texture->InstallTexture();
 	DAEDALUS_PROFILE( "RendererPSP::Draw2DTexture" );
 	TextureVtx *p_verts = (TextureVtx*)sceGuGetMemory(4*sizeof(TextureVtx));
@@ -1114,6 +1201,15 @@ void RendererPSP::Draw2DTextureR(f32 x0, f32 y0, f32 x1, f32 y1,
 								 f32 x2, f32 y2, f32 x3, f32 y3,
 								 f32 s, f32 t, std::shared_ptr<CNativeTexture> texture)	// With Rotation
 {
+#if DAEDALUS_S2DEX_COMBINER
+	if( gDraw2DCombiner && s <= 512.f && t <= 512.f )
+	{
+		const glm::vec2 xy[ 4 ] = { glm::vec2( x0, y0 ), glm::vec2( x1, y1 ), glm::vec2( x2, y2 ), glm::vec2( x3, y3 ) };
+		const glm::vec2 uv[ 4 ] = { glm::vec2( 0.0f, 0.0f ), glm::vec2( s, 0.0f ), glm::vec2( s, t ), glm::vec2( 0.0f, t ) };
+		Draw2DWithCombiner( xy, uv, GU_TRIANGLE_FAN, texture );
+		return;
+	}
+#endif
 	texture->InstallTexture();
 	DAEDALUS_PROFILE( "RendererPSP::Draw2DTextureR" );
 	TextureVtx *p_verts = (TextureVtx*)sceGuGetMemory(4*sizeof(TextureVtx));

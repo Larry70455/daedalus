@@ -22,6 +22,20 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include <utility>
 
+// PSP: sprites and backgrounds drawn while this scope is active use the
+// current combiner, blender and alpha compare (RendererPSP::Draw2DTexture)
+#ifdef DAEDALUS_PSP
+extern bool gDraw2DCombiner;
+struct SS2DEXDrawScope
+{
+	SS2DEXDrawScope()	{ gDraw2DCombiner = true; }
+	~SS2DEXDrawScope()	{ gDraw2DCombiner = false; }
+};
+#define S2DEX_DRAW_SCOPE	SS2DEXDrawScope s2dex_draw_scope
+#else
+#define S2DEX_DRAW_SCOPE
+#endif
+
 //*****************************************************************************
 // Needed by S2DEX
 //*****************************************************************************
@@ -300,6 +314,7 @@ static inline std::shared_ptr<CNativeTexture> Load_ObjSprite( const uObjSprite *
 template< ESpriteMode mode > 
 static void Draw_ObjSprite( const uObjSprite *sprite, const std::shared_ptr<CNativeTexture> texture )
 {
+	S2DEX_DRAW_SCOPE;
 	f32 imageW = sprite->imageW / 32.0f;
 	f32 imageH = sprite->imageH / 32.0f;
 
@@ -668,6 +683,7 @@ void DLParser_S2DEX_SelectDl( MicroCodeCommand command  [[maybe_unused]])
 //*****************************************************************************
 void DLParser_S2DEX_BgCopy( MicroCodeCommand command )
 {
+	S2DEX_DRAW_SCOPE;
 	const uObjScaleBg *objBg = (const uObjScaleBg*)(g_pu8RamBase + RDPSegAddr(command.inst.cmd1));
 	Load_BgSprite( objBg );
 
@@ -715,6 +731,7 @@ void DLParser_S2DEX_BgCopy( MicroCodeCommand command )
 //*****************************************************************************
 void DLParser_S2DEX_Bg1cyc( MicroCodeCommand command )
 {
+	S2DEX_DRAW_SCOPE;
 	if( g_ROM.GameHacks == ZELDA_MM )
 		return;
 
