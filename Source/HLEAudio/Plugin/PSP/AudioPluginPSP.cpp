@@ -521,7 +521,9 @@ void AudioPluginPSP::AddBuffer( u8 *start, u32 length )
 
 	case APM_ENABLED_ASYNC:
 		{
-
+			// Clean pause and fade in after running dry, as in Smooth mode
+			// (the audio work is on the Media Engine, nothing to skip)
+			mAudioBufferUncached->SetSmooth( true );
 			mAudioBufferUncached->AddSamples( reinterpret_cast< const Sample * >( start ), num_samples, mFrequency, kOutputFrequency );
 		
 		}

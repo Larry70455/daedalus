@@ -245,7 +245,7 @@ IRomPreferencesScreen::IRomPreferencesScreen( CUIContext * p_context, const RomI
 	mElements.Add(std::make_unique<CFSkipSetting>( &mRomPreferences.SpeedSyncEnabled, "Limit Framerate", "Limit the refresh rate to 50/25Hz (PAL) or 60/30Hz (NTSC)." ) );
 	mElements.Add(std::make_unique<CBoolSetting>( &mRomPreferences.DynarecEnabled, "Dynamic Recompilation", "Dynamic recompilation gives a considerable speed-up for the ROM emulation.", "Enabled", "Disabled" ) );
 	mElements.Add(std::make_unique<CBoolSetting>( &mRomPreferences.PatchesEnabled, "High Level Emulation", "Whether to use replicated OS function calls (faster) instead of emulating the real ones (slower) (WARNING, can cause instability and/or crash on certain ROMs).", "Enabled", "Disabled" ) );
-	mElements.Add(std::make_unique<CAudioSetting>( &mRomPreferences.AudioEnabled, "Audio", "Whether or not to enable audio emulation, and whether to process the audio asynchronously(fast/buggy) or synchronously(slow). Smooth: synchronous, but pauses cleanly instead of crackling and goes quiet for a second when the game falls far behind." ) );
+	mElements.Add(std::make_unique<CAudioSetting>( &mRomPreferences.AudioEnabled, "Audio", "Whether or not to enable audio emulation. Asynchronous: in sync, audio work on the Media Engine (fastest). Synchronous: audio work on the main CPU. Smooth: synchronous, but pauses cleanly instead of crackling and goes quiet for a second when the game falls far behind." ) );
 	mElements.Add(std::make_unique<CAdjustControllerSetting>( &mRomPreferences.ControllerIndex, "Controller" ) );
 
 //	mElements.Add( new CUISpacer( 16 ) );
