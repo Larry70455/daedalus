@@ -443,6 +443,9 @@ void	CCodeGeneratorPSP::Finalise( ExceptionHandlerFn p_exception_handler_fn, con
 void	CCodeGeneratorPSP::SetRegisterSpanList( const SRegisterUsageInfo & register_usage, bool loops_to_self )
 {
 	mRegisterSpanList = register_usage.SpanList;
+	// A snapshot is taken at every branch: room for a typical fragment up
+	// front, so the vector doesn't reallocate and copy them while growing
+	mRegisterSnapshots.reserve( 32 );
 #if DAEDALUS_PINNED_REGS
 	// Pinned registers are never allocated
 	mRegisterSpanList.erase( std::remove_if( mRegisterSpanList.begin(), mRegisterSpanList.end(),

@@ -167,7 +167,8 @@ static u32 HashCodeRuns( const std::vector< std::pair< u32, u32 > > & runs )
 
 void CFragment::SetCodeWords( std::vector< u32 > & addresses )
 {
-	std::sort( addresses.begin(), addresses.end() );
+	if( !std::is_sorted( addresses.begin(), addresses.end() ) )	// usually already in order (straight code)
+		std::sort( addresses.begin(), addresses.end() );
 	addresses.erase( std::unique( addresses.begin(), addresses.end() ), addresses.end() );
 	mCodeRuns.clear();
 	for( u32 a : addresses )
