@@ -121,6 +121,12 @@ extern "C" { void _IndirectExitCached(); }	// a1 = map, a2 = target pc, see Dyna
 #ifndef DAEDALUS_DEAD_EXIT_STORES
 #define DAEDALUS_DEAD_EXIT_STORES 1
 #endif
+
+// 1: in 32 bit mode an upper half whose PSP register is an unmodified copy
+// of memory stays valid when the lower half is written (see ForgetHi)
+#ifndef DAEDALUS_KEEP_CLEAN_HI
+#define DAEDALUS_KEEP_CLEAN_HI 1
+#endif
 // Test mode for the above: dead registers get garbage values (0xDEADBEEF)
 #ifndef DAEDALUS_DEAD_EXIT_STORES_POISON
 #define DAEDALUS_DEAD_EXIT_STORES_POISON 0
@@ -495,7 +501,12 @@ void	CCodeGeneratorPSP::SetRegisterSpanList( const SRegisterUsageInfo & register
 					//
 					if( register_usage.IsModified( n64_reg ) )
 					{
+						// Only so it is stored at exits: the value is still
+						// the one just loaded from memory
+						const bool mem_copy = mRegisterCache.IsMemCopy( n64_reg, lo_hi_idx );
 						mRegisterCache.MarkAsDirty( n64_reg, lo_hi_idx, true );
+						if( mem_copy )
+							mRegisterCache.SetMemCopy( n64_reg, lo_hi_idx );
 					}
 				}
 				++lo_hi_idx;
@@ -835,8 +846,12 @@ void CCodeGeneratorPSP::LoadRegister( EPspReg psp_reg, EN64Reg n64_reg, u32 lo_h
 		// Load the register if it's currently invalid
 		if( !mRegisterCache.IsValid( n64_reg,lo_hi_idx ) )
 		{
+			const bool from_memory = !mRegisterCache.IsKnownValue( n64_reg, lo_hi_idx ) &&
+									 !( lo_hi_idx == 1 && mRegisterCache.IsHiSignExtendPending( n64_reg ) );
 			GetRegisterValue( cached_reg, n64_reg, lo_hi_idx );
 			mRegisterCache.MarkAsValid( n64_reg, lo_hi_idx, true );
+			if( from_memory )
+				mRegisterCache.SetMemCopy( n64_reg, lo_hi_idx );	// see ForgetHi
 		}
 
 		// Copy the register if necessary
@@ -870,8 +885,12 @@ void	CCodeGeneratorPSP::PrepareCachedRegister( EN64Reg n64_reg, u32 lo_hi_idx )
 		// Load the register if it's currently invalid
 		if( !mRegisterCache.IsValid( n64_reg,lo_hi_idx ) )
 		{
+			const bool from_memory = !mRegisterCache.IsKnownValue( n64_reg, lo_hi_idx ) &&
+									 !( lo_hi_idx == 1 && mRegisterCache.IsHiSignExtendPending( n64_reg ) );
 			GetRegisterValue( cached_reg, n64_reg, lo_hi_idx );
 			mRegisterCache.MarkAsValid( n64_reg, lo_hi_idx, true );
+			if( from_memory )
+				mRegisterCache.SetMemCopy( n64_reg, lo_hi_idx );	// see ForgetHi
 		}
 	}
 }
@@ -980,10 +999,22 @@ inline void CCodeGeneratorPSP::SetRegister( EN64Reg n64_reg, u32 lo_hi_idx, u32 
 
 void CCodeGeneratorPSP::ForgetHi( EN64Reg n64_reg )
 {
+#if DAEDALUS_KEEP_CLEAN_HI
+	// The upper half in memory does not change here. If its PSP register
+	// still holds exactly what was loaded from memory (IsMemCopy), the copy
+	// stays valid: reading it is the same
+	// as reading memory. Loops then no longer reload such upper halves at
+	// every iteration (GenerateExitCode, PrepareCachedRegister).
+	const bool clean_copy = mRegisterCache.IsCached( n64_reg, 1 ) && mRegisterCache.IsValid( n64_reg, 1 ) &&
+							mRegisterCache.IsMemCopy( n64_reg, 1 ) && !mRegisterCache.IsKnownValue( n64_reg, 1 ) &&
+							!mRegisterCache.IsHiSignExtendPending( n64_reg );
+#else
+	const bool clean_copy = false;
+#endif
 	mRegisterCache.SetHiSignExtendPending( n64_reg, false );
 	mRegisterCache.ClearKnownValue( n64_reg, 1 );
 	mRegisterCache.MarkAsDirty( n64_reg, 1, false );
-	if( mRegisterCache.IsCached( n64_reg, 1 ) )
+	if( mRegisterCache.IsCached( n64_reg, 1 ) && !clean_copy )
 		mRegisterCache.MarkAsValid( n64_reg, 1, false );
 }
 

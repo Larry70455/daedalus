@@ -46,6 +46,7 @@ public:
 					mRegisterCacheInfo[i][lo_hi_idx].Dirty = false;
 					mRegisterCacheInfo[i][lo_hi_idx].Known = false;
 					mRegisterCacheInfo[i][lo_hi_idx].SignExtendPending = false;
+					mRegisterCacheInfo[i][lo_hi_idx].MemCopy = false;
 				}
 			}
 
@@ -60,6 +61,7 @@ public:
 		inline void	SetCachedReg( EN64Reg n64_reg, u32 lo_hi_idx, NativeReg psp_reg )
 		{
 			mRegisterCacheInfo[ n64_reg ][ lo_hi_idx ].NativeRegister = psp_reg;
+			mRegisterCacheInfo[ n64_reg ][ lo_hi_idx ].MemCopy = false;
 		}
 
 		inline bool	IsCached( EN64Reg reg, u32 lo_hi_idx ) const
@@ -115,6 +117,7 @@ public:
 			DAEDALUS_ASSERT( IsCached( reg, lo_hi_idx ), "Changing valid flag on uncached register?" );
 			#endif
 			mRegisterCacheInfo[ reg ][ lo_hi_idx ].Valid = valid;
+			mRegisterCacheInfo[ reg ][ lo_hi_idx ].MemCopy = false;	// whoever marks it, wrote it
 		}
 
 		inline void	MarkAsDirty( EN64Reg reg, u32 lo_hi_idx, bool dirty )
@@ -126,13 +129,22 @@ public:
 			}
 #endif
 			mRegisterCacheInfo[ reg ][ lo_hi_idx ].Dirty = dirty;
+			if( dirty )
+				mRegisterCacheInfo[ reg ][ lo_hi_idx ].MemCopy = false;
 		}
+
+		// The native register holds exactly what memory holds for this half:
+		// set only right after loading it from memory, cleared by anything
+		// that marks the register written (valid/dirty), reassigned, known or
+		// pending (see CCodeGeneratorPSP::ForgetHi)
+		inline bool	IsMemCopy( EN64Reg reg, u32 lo_hi_idx ) const		{ return mRegisterCacheInfo[ reg ][ lo_hi_idx ].MemCopy; }
+		inline void	SetMemCopy( EN64Reg reg, u32 lo_hi_idx )			{ mRegisterCacheInfo[ reg ][ lo_hi_idx ].MemCopy = true; }
 
 
 		// Lazy sign extension: the high half of reg equals the sign of its low
 		// half, but memory (and any cached copy) does not hold it yet
 		inline bool	IsHiSignExtendPending( EN64Reg reg ) const			{ return mRegisterCacheInfo[ reg ][ 1 ].SignExtendPending; }
-		inline void	SetHiSignExtendPending( EN64Reg reg, bool pending )	{ mRegisterCacheInfo[ reg ][ 1 ].SignExtendPending = pending; }
+		inline void	SetHiSignExtendPending( EN64Reg reg, bool pending )	{ mRegisterCacheInfo[ reg ][ 1 ].SignExtendPending = pending; if( pending ) mRegisterCacheInfo[ reg ][ 1 ].MemCopy = false; }
 
 		inline bool	IsKnownValue( EN64Reg reg, u32 lo_hi_idx ) const
 		{
@@ -142,6 +154,7 @@ public:
 		inline void	SetKnownValue( EN64Reg reg, u32 lo_hi_idx, s32 value )
 		{
 			mRegisterCacheInfo[ reg ][ lo_hi_idx ].Known = true;
+			mRegisterCacheInfo[ reg ][ lo_hi_idx ].MemCopy = false;
 			mRegisterCacheInfo[ reg ][ lo_hi_idx ].KnownValue._u32 = value;
 		}
 
@@ -205,6 +218,7 @@ public:
 			NativeReg		NativeRegister;		// If cached, this is the psp register we're using
 			bool			Valid;				// Is the contents of the register valid?
 			bool			Dirty;				// Is the contents of the register modified?
+			bool			MemCopy;			// Holds exactly the value in memory (see IsMemCopy)
 			bool			Known;				// Is the contents of the known?
 			bool			SignExtendPending;	// (high half only) the high half is the sign extension of the low half but not written yet, see CCodeGeneratorPSP::MaterializeHi
 			//bool			SignExtended;		// Is this (high) register just sign extension of low reg?
