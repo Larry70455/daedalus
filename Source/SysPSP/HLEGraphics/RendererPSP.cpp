@@ -105,6 +105,15 @@ namespace
 		return u32( reinterpret_cast<uintptr_t>( token.get() ) - 1 );
 	}
 
+	// Front end vertices (recording): an arena of their own, reset for
+	// each display list. The back end copies each batch into the frame's
+	// vertex memory when it replays it, so the front end never touches
+	// that memory (it changes at each vertical blank) or the GE list.
+	const u32				kFrontVertexBytes = 512 * 1024;
+	alignas(64) u8			gFrontVertices[ kFrontVertexBytes ];
+	u32						gFrontVerticesUsed = 0;
+	u8 *					gFrontVerticesEnd = nullptr;	// exact end of the last allocation
+
 	void ReplayAll()
 	{
 		// The back end sets these shared globals from the recorded state;
@@ -1817,7 +1826,10 @@ void RendererPSP::ReplayCommands( const u8 * p, const u8 * p_end )
 		case GOP_TRIS:
 		{
 			const SOpTris * op = static_cast<const SOpTris *>( data );
-			RenderTriangles( op->Verts, op->Count, op->DisableZ != 0 );
+			// Into this frame's vertex memory: the front end reuses its own
+			DaedalusVtx * verts = AllocVertices( op->Count );
+			memcpy( verts, op->Verts, op->Count * sizeof( DaedalusVtx ) );
+			RenderTriangles( verts, op->Count, op->DisableZ != 0 );
 			break;
 		}
 		case GOP_TEXRECT:
@@ -1904,6 +1916,38 @@ void RendererPSP::ClearColBuffer( c32 colour )
 	CGraphicsContext::Get()->ClearColBuffer( colour );
 }
 
+// Front end (TempVerts::Alloc while recording): room for 'bytes' of
+// vertices, right after append_to when that is where the last ones ended
+void * GfxStream_AllocVertices( u32 bytes, void * append_to )
+{
+	if( append_to != nullptr && append_to == gFrontVerticesEnd )
+	{
+		const u32 offset = u32( static_cast<u8 *>( append_to ) - gFrontVertices );
+		if( offset + bytes <= kFrontVertexBytes )
+		{
+			gFrontVerticesUsed = ( offset + bytes + 15 ) & ~15u;
+			gFrontVerticesEnd = gFrontVertices + offset + bytes;
+			return append_to;
+		}
+	}
+	const u32 aligned = ( bytes + 15 ) & ~15u;
+	if( gFrontVerticesUsed + aligned > kFrontVertexBytes )
+	{
+		// Full: draw everything recorded so far (the back end copies the
+		// vertices), held back triangles included, then start again
+		gRendererPSP->FlushPendingDraw();
+		ReplayAll();
+		gFrontVerticesUsed = 0;
+		gFrontVerticesEnd = nullptr;
+		if( aligned > kFrontVertexBytes )
+			return nullptr;
+	}
+	void * p = gFrontVertices + gFrontVerticesUsed;
+	gFrontVerticesUsed += aligned;
+	gFrontVerticesEnd = static_cast<u8 *>( p ) + bytes;
+	return p;
+}
+
 bool GfxStream_Begin()
 {
 	if( gRendererBack == nullptr || gGfxStreamOff )
@@ -1912,6 +1956,8 @@ bool GfxStream_Begin()
 	gStreamPos = 0;
 	gLastStateValid = false;
 	gNextTextureId = 0;
+	gFrontVerticesUsed = 0;
+	gFrontVerticesEnd = nullptr;
 	gStreamActive = true;
 	gRendererPSP->SetRecording( true );
 	return true;

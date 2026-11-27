@@ -97,6 +97,9 @@ extern void sceGuSetMatrix(int type, const ScePspFMatrix4 * mtx);
 #ifdef DAEDALUS_PSP
 void * PSP_AllocFrameVertices( u32 bytes );
 void * PSP_AppendFrameVertices( void * expected, u32 bytes );
+#if DAEDALUS_GFX_STREAM
+void * GfxStream_AllocVertices( u32 bytes, void * append_to );
+#endif
 #include "SysPSP/Graphics/GuStateCache.h"
 #undef sceGuEnable
 #undef sceGuDisable
@@ -142,6 +145,15 @@ struct TempVerts
 		// AppendTo: try to place the vertices right after earlier ones, so
 		// both can be drawn as one batch (see FlushTris)
 		Verts = nullptr;
+#if DAEDALUS_GFX_STREAM
+		if( gRenderer->IsRecording() )
+		{
+			// The front end's own vertex arena (see GfxStream_AllocVertices)
+			Verts = static_cast<DaedalusVtx*>(GfxStream_AllocVertices(bytes, AppendTo));
+			Count = count;
+			return Verts;
+		}
+#endif
 		if( AppendTo != nullptr )
 			Verts = static_cast<DaedalusVtx*>(PSP_AppendFrameVertices(AppendTo, bytes));
 		if( Verts == nullptr )
