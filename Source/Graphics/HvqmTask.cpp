@@ -209,15 +209,32 @@ static int process_info(uint8_t* base, int16_t* out)
     return 1;
 }
 
+#ifndef DAEDALUS_HVQM_INT_COLOUR
+#define DAEDALUS_HVQM_INT_COLOUR 1
+#endif
+
 #define SATURATE(x) ((unsigned int) x <= 31 ? x : (x < 0 ? 0 : 31))
 static uint16_t YCbCr_to_BGRA5551(int16_t Y, int16_t Cb, int16_t Cr, uint8_t alpha)
 {
     int r, g, b;
 
     //Format S7.9
+#if DAEDALUS_HVQM_INT_COLOUR
+    // Every constant below is a multiple of 1/512 and every sum fits in a
+    // double without rounding, so this integer form gives exactly the same
+    // result (C integer division truncates toward zero, like the (int) cast).
+    // The PSP has no double unit, so the double form was slow software maths.
+    const int y = 64 * Y + 32;
+    const int cr = Cr - 128;
+    const int cb = Cb - 128;
+    r = (y + 113 * cr) / 512;
+    g = (y - 22 * cr - 46 * cb) / 512;
+    b = (y + 90 * cb) / 512;
+#else
     r = (int)(((double)Y * 0.125 + 0.0625) + (0.220703125 * (double)(Cr - 128)));
     g = (int)(((double)Y * 0.125 + 0.0625) - (0.04296875 * (double)(Cr - 128)) - (0.08984375 * (double)(Cb - 128)));
     b = (int)(((double)Y * 0.125 + 0.0625) + (0.17578125 * (double)(Cb - 128)));
+#endif
 
     r = SATURATE(r);
     g = SATURATE(g);
