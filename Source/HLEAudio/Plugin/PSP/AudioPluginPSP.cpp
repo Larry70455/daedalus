@@ -150,6 +150,15 @@ static void MEAudio_Wait()
 }
 #endif
 
+// For the display list front end on the Media Engine (DLParser_MEKick):
+// one Media Engine job at a time
+void MEAudio_WaitForJob()
+{
+#if defined( DAEDALUS_PSP_USE_ME ) && DAEDALUS_ME_AUDIO_SAFE
+	MEAudio_Wait();
+#endif
+}
+
 #define RSP_AUDIO_INTR_CYCLES     1
 extern u32 gSoundSync;
 

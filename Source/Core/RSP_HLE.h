@@ -36,5 +36,10 @@ enum EProcessResult
 
 void RSP_HLE_Reset();
 void RSP_HLE_ProcessTask();
+// A graphics task processed on the Media Engine (PSP, DAEDALUS_ME_GRAPHICS)
+// finishes later: PollGraphics (CPU_EVENT_GFX_ME) finishes it when done,
+// SyncGraphics waits for it (no-ops elsewhere)
+void RSP_HLE_PollGraphics();
+void RSP_HLE_SyncGraphics();
 
 #endif // CORE_RSP_HLE_H_

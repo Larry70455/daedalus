@@ -555,6 +555,120 @@ static u32 DLParser_ProcessDList(u32 instruction_limit)
 //*****************************************************************************
 //
 //*****************************************************************************
+#if DAEDALUS_ME_GRAPHICS
+//*****************************************************************************
+// Display list front end on the Media Engine
+//
+// The main CPU sets up the display list as usual (microcode, stack, RDP
+// state), then the Media Engine parses it and records the drawing commands
+// (see SGfxState) while the main CPU carries on with the game. A CPU event
+// (CPU_EVENT_GFX_ME) checks every few thousand cycles whether it is done;
+// then the main CPU replays the commands and raises the end of task
+// interrupts, like the RSP and RDP finishing on a real N64. The main CPU
+// waits for the Media Engine instead when the game only idles (nothing to
+// do in parallel) or after about half a vertical blank (the time a real
+// RDP could take).
+//
+// Cache: the main CPU writes back its data cache before the job; the Media
+// Engine drops its own data cache first and writes it back at the end; the
+// main CPU drops its own again before reading the results. Everything the
+// front end writes sits in cache lines of its own (MEShared.h). Commands
+// that do not fit in the buffers are dropped on the Media Engine.
+//*****************************************************************************
+#include "SysPSP/PRX/MediaEngine/me.h"
+#include <pspkernel.h>
+
+extern volatile me_struct *	mei;
+extern bool					gLoadedMediaEnginePRX;
+extern bool					gDoubleDisplayEnabled;
+bool						InitialiseMediaEngine();
+void						MEAudio_WaitForJob();
+extern bool					gCPUIdleSkipped;
+extern bool					gGfxStreamOff;
+
+static const s32			kGfxMEPollCycles = 4000;	// N64 count cycles between checks
+static const u32			kGfxMEMaxPolls = 8;		// about half a vertical blank
+static bool					gGfxMEPending = false;		// main CPU only
+static u32					gGfxMEPolls = 0;
+
+// Runs on the Media Engine
+static int DLParser_FrontEndJob( int instruction_limit )
+{
+	DLParser_ProcessDList( (u32)instruction_limit );
+	gRenderer->FlushPendingDraw();
+	gRenderer->EndRenderTarget();
+	gRenderer->EndScene();
+	return 0;
+}
+
+static bool DLParser_MEKick( u32 instruction_limit )
+{
+	if( !gDoubleDisplayEnabled || gGfxStreamOff )
+		return false;
+	if( !gLoadedMediaEnginePRX && !InitialiseMediaEngine() )
+		return false;
+	MEAudio_WaitForJob();		// one Media Engine job at a time
+	if( !CheckME( mei ) )
+		return false;
+	if( !GfxStream_BeginOnME() )
+		return false;
+	gRenderer->BeginScene();	// recording: viewport state only
+	// The display list, task and everything set up above must be in memory
+	sceKernelDcacheWritebackInvalidateAll();
+	if( BeginME( mei, (int)&DLParser_FrontEndJob, (int)instruction_limit, -1, nullptr, -1, nullptr ) < 0 )
+	{
+		GfxStream_CancelOnME();
+		return false;
+	}
+	gGfxMEPending = true;
+	gGfxMEPolls = 0;
+	gCPUIdleSkipped = false;
+	CPU_AddEvent( kGfxMEPollCycles, CPU_EVENT_GFX_ME );
+	return true;
+}
+
+bool DLParser_MEPending()
+{
+	return gGfxMEPending;
+}
+
+// Main CPU: wait for the Media Engine if needed, then draw what it recorded
+void DLParser_MEFinish()
+{
+	if( !gGfxMEPending )
+		return;
+	if( !CheckME( mei ) )
+		WaitME( mei );
+	sceKernelDcacheWritebackInvalidateAll();	// see what the Media Engine wrote
+	gGfxMEPending = false;
+	GfxStream_End();
+	if( gRDPFullSyncPending )
+	{
+		gRDPFullSyncPending = false;
+		FinishRDPJob();
+	}
+}
+
+// CPU_EVENT_GFX_ME: true when the task is finished
+bool DLParser_MEPoll()
+{
+	if( !gGfxMEPending )
+		return false;
+	++gGfxMEPolls;
+	if( CheckME( mei ) || gCPUIdleSkipped || gGfxMEPolls >= kGfxMEMaxPolls )
+	{
+		DLParser_MEFinish();
+		return true;
+	}
+	CPU_AddEvent( kGfxMEPollCycles, CPU_EVENT_GFX_ME );
+	return false;
+}
+#elif defined(DAEDALUS_PSP)
+bool DLParser_MEPending()	{ return false; }
+void DLParser_MEFinish()	{}
+bool DLParser_MEPoll()		{ return false; }
+#endif
+
 u32 DLParser_Process(u32 instruction_limit, DLDebugOutput * debug_output)
 {
 	DAEDALUS_PROFILE( "DLParser_Process" );
@@ -623,6 +737,12 @@ u32 DLParser_Process(u32 instruction_limit, DLDebugOutput * debug_output)
 		gRenderer->SetVIScales();
 		gRenderer->ResetMatrices(stack_size);
 		gRenderer->Reset();
+#if DAEDALUS_ME_GRAPHICS
+		// Parse and record the display list on the Media Engine while the
+		// main CPU carries on; the task finishes later (DLParser_MEFinish)
+		if( DLParser_MEKick( instruction_limit ) )
+			return 0;
+#endif
 #if DAEDALUS_GFX_STREAM
 		// Record the display list, then draw it with the back end renderer
 		const bool recording = GfxStream_Begin();

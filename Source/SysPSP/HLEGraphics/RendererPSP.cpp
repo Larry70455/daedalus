@@ -124,6 +124,18 @@ namespace
 	SMELine<u8 *>			gFrontVerticesEnd_ = { nullptr };	// exact end of the last allocation
 	#define gFrontVerticesEnd	(gFrontVerticesEnd_.v)
 
+#if DAEDALUS_ME_GRAPHICS
+	// Recording on the Media Engine (see DLParser_MEKick): a full buffer
+	// cannot be drawn from there, so from then on the rest of the display
+	// list is dropped (it is sticky: no command may lose its state record)
+	SMELine<bool>			gFrontOnME_ = { false };
+	#define gFrontOnME			(gFrontOnME_.v)
+	SMELine<bool>			gFrontOverflow_ = { false };
+	#define gFrontOverflow		(gFrontOverflow_.v)
+	alignas(64) u8			gFrontScratch[ 16 * 1024 ];	// where dropped commands and vertices go
+	bool					gBackBegunLate = false;		// main CPU: the back end starts at the replay
+#endif
+
 	void ReplayAll()
 	{
 		// The back end sets these shared globals from the recorded state;
@@ -143,6 +155,13 @@ namespace
 	{
 		bytes = ( bytes + 3 ) & ~3u;
 		const u32 limit = gGfxStreamLimit < kStreamBytes ? gGfxStreamLimit : kStreamBytes;
+#if DAEDALUS_ME_GRAPHICS
+		if( gFrontOnME && ( gFrontOverflow || gStreamPos + sizeof( SGfxOpHeader ) + bytes > limit ) )
+		{
+			gFrontOverflow = true;
+			return gFrontScratch;
+		}
+#endif
 		if( gStreamPos + sizeof( SGfxOpHeader ) + bytes > limit )
 			ReplayAll();
 		SGfxOpHeader * h = reinterpret_cast<SGfxOpHeader *>( &gStream[ gStreamPos ] );
@@ -1859,8 +1878,8 @@ void RendererPSP::ApplyState( const SGfxState & st )
 
 void RendererPSP::BeginReplayFrame()
 {
-	// Same as the front end at the start of the display list
-	SetVIScales();
+	// Same as the front end at the start of the display list (the VI
+	// scales are the ones the front end read then)
 	Reset();
 	BeginScene();
 	mScissor[ 0 ] = 0; mScissor[ 1 ] = 0; mScissor[ 2 ] = 320; mScissor[ 3 ] = 240;
@@ -2010,6 +2029,13 @@ void * GfxStream_AllocVertices( u32 bytes, void * append_to )
 		}
 	}
 	const u32 aligned = ( bytes + 15 ) & ~15u;
+#if DAEDALUS_ME_GRAPHICS
+	if( gFrontOnME && ( gFrontOverflow || gFrontVerticesUsed + aligned > kFrontVertexBytes ) )
+	{
+		gFrontOverflow = true;
+		return gFrontScratch;	// at most kMaxIndices or the clipped vertices of one batch
+	}
+#endif
 	if( gFrontVerticesUsed + aligned > kFrontVertexBytes )
 	{
 		// Full: draw everything recorded so far (the back end copies the
@@ -2042,10 +2068,47 @@ bool GfxStream_Begin()
 	return true;
 }
 
+#if DAEDALUS_ME_GRAPHICS
+// Main CPU, before starting the Media Engine job: recording, the back end
+// starts later (GfxStream_End)
+bool GfxStream_BeginOnME()
+{
+	if( gRendererBack == nullptr )
+		return false;
+	gStreamPos = 0;
+	gLastStateValid = false;
+	gNextTextureId = 0;
+	gFrontVerticesUsed = 0;
+	gFrontVerticesEnd = nullptr;
+	gFrontOnME = true;
+	gFrontOverflow = false;
+	gBackBegunLate = true;
+	gStreamActive = true;
+	gRendererPSP->SetRecording( true );
+	return true;
+}
+
+void GfxStream_CancelOnME()
+{
+	gRendererPSP->SetRecording( false );
+	gStreamActive = false;
+	gFrontOnME = false;
+	gBackBegunLate = false;
+}
+#endif
+
 void GfxStream_End()
 {
 	if( !gStreamActive )
 		return;
+#if DAEDALUS_ME_GRAPHICS
+	if( gBackBegunLate )
+	{
+		gBackBegunLate = false;
+		gRendererBack->BeginReplayFrame();
+	}
+	gFrontOnME = false;
+#endif
 	gRendererPSP->SetRecording( false );
 	gStreamActive = false;
 	ReplayAll();

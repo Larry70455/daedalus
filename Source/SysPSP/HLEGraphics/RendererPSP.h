@@ -168,6 +168,10 @@ extern RendererPSP * gRendererBack;
 // Display list recording: true while the front end records (DLParser_Process)
 bool GfxStream_Begin();
 void GfxStream_End();
+#if DAEDALUS_ME_GRAPHICS
+bool GfxStream_BeginOnME();		// recording on the Media Engine (DLParser_MEKick)
+void GfxStream_CancelOnME();
+#endif
 #endif
 
 #endif // SYSPSP_HLEGRAPHICS_RENDERERPSP_H_

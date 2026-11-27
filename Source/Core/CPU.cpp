@@ -146,9 +146,12 @@ void CPU_UnregisterVblCallback(VblCallbackFn fn, void * arg)
 	}
 }
 
+bool gCPUIdleSkipped = false;
+
 void CPU_SkipToNextEvent()
 {
 	LOCK_EVENT_QUEUE();
+	gCPUIdleSkipped = true;
 
 #ifdef DAEDALUS_ENABLE_ASSERTS
 	DAEDALUS_ASSERT( gCPUState.NumEvents > 0, "There are no events" );
@@ -410,6 +413,7 @@ bool CPU_RomOpen()
 
 void CPU_RomClose()
 {
+	RSP_HLE_SyncGraphics();
 #ifdef DAEDALUS_ENABLE_DYNAREC
 	#ifdef DAEDALUS_DEBUG_CONSOLE_DYNAREC
 		//This will dump the fragment cache on exit to ROMs menu
@@ -501,6 +505,8 @@ bool CPU_RequestLoadStateAfterBoot( const std::filesystem::path &filename )
 
 static void HandleSaveStateOperationOnVerticalBlank()
 {
+	if( gSaveStateOperation != SSO_NONE )
+		RSP_HLE_SyncGraphics();	// a display list still on the Media Engine finishes first
 	DAEDALUS_ASSERT(gCPURunning, "Expecting the CPU to be running at this point");
 	if( gSaveStateOperation == SSO_NONE )
 		return;
@@ -753,6 +759,9 @@ void CPU_HANDLE_COUNT_INTERRUPT()
 	case CPU_EVENT_SPINT:
 		Memory_MI_SetRegisterBits(MI_INTR_REG, MI_INTR_SP);
 		R4300_Interrupt_UpdateCause3();
+		break;
+	case CPU_EVENT_GFX_ME:
+		RSP_HLE_PollGraphics();
 		break;
 	}
 

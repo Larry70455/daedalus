@@ -131,6 +131,31 @@ void RSP_HLE_Finished(u32 setbits)
 
 //
 
+#if defined(DAEDALUS_PSP)
+bool DLParser_MEPending();
+void DLParser_MEFinish();
+bool DLParser_MEPoll();
+#endif
+
+void RSP_HLE_PollGraphics()
+{
+#if defined(DAEDALUS_PSP)
+	if( DLParser_MEPoll() )
+		RSP_HLE_Finished(SP_STATUS_TASKDONE|SP_STATUS_BROKE|SP_STATUS_HALT);
+#endif
+}
+
+void RSP_HLE_SyncGraphics()
+{
+#if defined(DAEDALUS_PSP)
+	if( DLParser_MEPending() )
+	{
+		DLParser_MEFinish();
+		RSP_HLE_Finished(SP_STATUS_TASKDONE|SP_STATUS_BROKE|SP_STATUS_HALT);
+	}
+#endif
+}
+
 static EProcessResult RSP_HLE_Graphics()
 {
 	DAEDALUS_PROFILE( "HLE: Graphics" );
@@ -138,6 +163,10 @@ static EProcessResult RSP_HLE_Graphics()
 	if (gGraphicsEnabled && gGraphicsPlugin != nullptr)
 	{
 		gGraphicsPlugin->ProcessDList();
+#if defined(DAEDALUS_PSP)
+		if( DLParser_MEPending() )
+			return PR_STARTED;		// on the Media Engine: finished by RSP_HLE_PollGraphics
+#endif
 	}
 	else
 	{
@@ -252,6 +281,7 @@ void RSP_HLE_Reset()
 
 void RSP_HLE_ProcessTask()
 {
+	RSP_HLE_SyncGraphics();		// the RSP runs one task at a time
 	OSTask * pTask = (OSTask *)(g_pu8SpMemBase + 0x0FC0);
 	EProcessResult	result( PR_NOT_STARTED );
 

@@ -73,10 +73,11 @@ enum	ECPUEventType
 	CPU_EVENT_COMPARE,
 	CPU_EVENT_AUDIO,
 	CPU_EVENT_SPINT,
+	CPU_EVENT_GFX_ME,	// is the display list on the Media Engine done? (RSP_HLE_PollGraphics)
 };
 
-// In practice there should only ever be 2
-#define MAX_CPU_EVENTS 4
+// In practice there should only ever be 2 (up to 5 with all of the above)
+#define MAX_CPU_EVENTS 6
 
 struct CPUEvent
 {
@@ -179,6 +180,7 @@ void	CPU_EnableBreakPoint( u32 address, bool enable );		// Enable/Disable the br
 bool	CPU_IsRunning();
 void	CPU_AddEvent( s32 count, ECPUEventType event_type );
 void	CPU_SkipToNextEvent();
+extern bool gCPUIdleSkipped;	// set by CPU_SkipToNextEvent: the game was idling
 bool	CPU_CheckStuffToDo();
 using VblCallbackFn = void(*) (void * arg);
 
