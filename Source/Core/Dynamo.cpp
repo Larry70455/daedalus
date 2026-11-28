@@ -574,6 +574,10 @@ void CPU_HandleDynaRecOnBranch( bool backwards, bool trace_already_enabled )
 			// trace and the stale fragments now
 			if( gTraceRecorder.IsTraceActive() )
 			{
+				// Not a problem with the code itself, so it may become a
+				// trace again: a hot count past the threshold never would
+				// (a loop with a CACHE instruction would stay interpreted)
+				gHotTraceCountMap.erase( gTraceRecorder.GetStartTraceAddress() );
 				gTraceRecorder.AbortTrace();
 				change_core = true;
 			}
